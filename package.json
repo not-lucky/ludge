@@ -1,0 +1,33 @@
+{
+  "name": "palestra",
+  "version": "0.1.0",
+  "description": "Palestra Judge — a local, extensible LeetCode-style judge.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "palestra": "dist/cli/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "depcruise": "depcruise src --config .dependency-cruiser.cjs",
+    "lint": "eslint . && npm run depcruise",
+    "start": "node dist/cli/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "dependency-cruiser": "^16.0.0",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.19.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+
+# Runtime data (created lazily by `palestra` at runtime)
+.palestra/
+
+# Logs and OS cruft
+*.log
+.DS_Store
