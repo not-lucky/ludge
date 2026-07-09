@@ -7,12 +7,14 @@
  * obligations against real implementations.
  */
 
-import { describe, it } from "vitest";
+import { describe, it, expect } from "vitest";
 import type {
   Codec,
   DecodeResult,
   OutputComparator,
 } from "../../src/judging/ports/index.js";
+import { createTaggedJsonlV1Codec } from "../../src/judging/codec/index.js";
+import type { CanonicalValue } from "../../src/judging/value/index.js";
 
 // Retain the type-only imports and verify the port surface exists.
 type _PortSurface = [
@@ -22,10 +24,47 @@ type _PortSurface = [
 ];
 
 describe("Codec contract", () => {
-  it.todo("encode() then decode() round-trips a canonical value exactly");
-  it.todo("decode() returns { ok: false } (never throws) on malformed bytes");
-  it.todo("decode() rejects inputs that exceed depth/node/size limits");
-  it.todo("decode() rejects unknown tags, duplicate keys, and invalid UTF-8");
+  const codec: Codec<CanonicalValue> = createTaggedJsonlV1Codec("backend");
+
+  it("encode() then decode() round-trips a canonical value exactly", () => {
+    const value: CanonicalValue = {
+      tag: "dict",
+      entries: [
+        {
+          key: { tag: "str", value: "n" },
+          value: { tag: "int", value: 5n },
+        },
+      ],
+    };
+    const result = codec.decode(codec.encode(value));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual(value);
+    }
+  });
+
+  it("decode() returns { ok: false } (never throws) on malformed bytes", () => {
+    const result = codec.decode(new TextEncoder().encode("{not json"));
+    expect(result.ok).toBe(false);
+  });
+
+  it("decode() rejects inputs that exceed depth/node/size limits", () => {
+    let json = '{"tag":"null"}';
+    for (let i = 0; i < 300; i += 1) {
+      json = `{"tag":"list","items":[${json}]}`;
+    }
+    expect(codec.decode(new TextEncoder().encode(json)).ok).toBe(false);
+  });
+
+  it("decode() rejects unknown tags, duplicate keys, and invalid UTF-8", () => {
+    expect(codec.decode(new TextEncoder().encode('{"tag":"nope"}')).ok).toBe(
+      false,
+    );
+    expect(
+      codec.decode(new TextEncoder().encode('{"tag":"null","tag":"null"}')).ok,
+    ).toBe(false);
+    expect(codec.decode(new Uint8Array([0xff, 0xfe])).ok).toBe(false);
+  });
 });
 
 describe("OutputComparator contract", () => {
