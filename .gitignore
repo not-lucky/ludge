@@ -14,3 +14,8 @@ coverage/
 # Logs and OS cruft
 *.log
 .DS_Store
+
+
+*.pyc
+.venv
+.env

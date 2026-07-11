@@ -1,0 +1,11 @@
+schemaVersion: 1
+slug: low-memory
+title: Low Memory Example
+entrypoint: solution.py
+runtime: python-uv
+inputCodec: tagged-jsonl-v1
+outputCodec: tagged-jsonl-v1
+comparisonPolicy: exact-v1
+limits:
+  memoryBytes: 33554432
+casesDir: cases

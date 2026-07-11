@@ -9,10 +9,8 @@
 /**
  * A sink that receives structured telemetry events.
  *
- * `TEvent` is the event envelope defined by task 10 (schemaVersion 1); task 03
- * fixes only the contract so producers depend on the port, not a concrete
- * adapter. It is left generic here because task 03 must not anticipate the
- * concrete envelope shape.
+ * `TEvent` is generic so ports remain usable by tests and future envelope
+ * versions. Schema-v1 production code instantiates it with `TelemetryEvent`.
  */
 export interface TelemetrySink<TEvent = unknown> {
   /**

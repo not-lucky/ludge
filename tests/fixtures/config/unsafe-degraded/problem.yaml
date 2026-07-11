@@ -1,0 +1,10 @@
+schemaVersion: 1
+slug: unsafe-degraded
+title: Unsafe Degraded Example
+entrypoint: solution.py
+runtime: python-uv
+inputCodec: tagged-jsonl-v1
+outputCodec: tagged-jsonl-v1
+comparisonPolicy: exact-v1
+limits: {}
+casesDir: cases

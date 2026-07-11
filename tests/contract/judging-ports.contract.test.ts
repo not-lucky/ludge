@@ -14,7 +14,9 @@ import type {
   OutputComparator,
 } from "../../src/judging/ports/index.js";
 import { createTaggedJsonlV1Codec } from "../../src/judging/codec/index.js";
+import { createOutputComparator } from "../../src/judging/comparator/index.js";
 import type { CanonicalValue } from "../../src/judging/value/index.js";
+import type { ComparisonPolicy } from "../../src/domain/index.js";
 
 // Retain the type-only imports and verify the port surface exists.
 type _PortSurface = [
@@ -68,8 +70,88 @@ describe("Codec contract", () => {
 });
 
 describe("OutputComparator contract", () => {
-  it.todo("compare() reports equality for structurally equal values");
-  it.todo("compare() returns the first mismatch path for unequal values");
-  it.todo("compare() honors numeric tolerance only on finite numeric leaves");
-  it.todo("compare() applies whitespace normalization only for text outputs");
+  const comparator: OutputComparator<CanonicalValue> = createOutputComparator();
+  const semantic: ComparisonPolicy = {
+    version: "exact-v1",
+    equality: "semantic",
+    normalizeWhitespace: false,
+  };
+
+  it("compare() reports equality for structurally equal values", () => {
+    const value: CanonicalValue = {
+      tag: "list",
+      items: [
+        { tag: "int", value: 1n },
+        { tag: "str", value: "x" },
+      ],
+    };
+    expect(comparator.compare(value, value, semantic)).toEqual({ equal: true });
+  });
+
+  it("compare() returns the first mismatch path for unequal values", () => {
+    const expected: CanonicalValue = {
+      tag: "list",
+      items: [
+        { tag: "int", value: 1n },
+        { tag: "int", value: 2n },
+      ],
+    };
+    const actual: CanonicalValue = {
+      tag: "list",
+      items: [
+        { tag: "int", value: 1n },
+        { tag: "int", value: 9n },
+      ],
+    };
+    const result = comparator.compare(expected, actual, semantic);
+    expect(result.equal).toBe(false);
+    if (!result.equal) {
+      expect(result.mismatch.path).toBe("$.items[1]");
+    }
+  });
+
+  it("compare() honors numeric tolerance only on finite numeric leaves", () => {
+    const tolerant: ComparisonPolicy = {
+      version: "exact-v1",
+      equality: "semantic",
+      normalizeWhitespace: false,
+      tolerance: { absolute: 0.01, relative: 0 },
+    };
+    const near: CanonicalValue = { tag: "float", value: "1.005", negativeZero: false };
+    const base: CanonicalValue = { tag: "float", value: "1", negativeZero: false };
+    expect(comparator.compare(base, near, tolerant)).toEqual({ equal: true });
+
+    // The same tolerance must not relax integers.
+    const intResult = comparator.compare(
+      { tag: "int", value: 1n },
+      { tag: "int", value: 2n },
+      tolerant,
+    );
+    expect(intResult.equal).toBe(false);
+  });
+
+  it("compare() applies whitespace normalization only for text outputs", () => {
+    const normalizing: ComparisonPolicy = {
+      version: "exact-v1",
+      equality: "semantic",
+      normalizeWhitespace: true,
+    };
+    expect(
+      comparator.compare(
+        { tag: "str", value: "a  b" },
+        { tag: "str", value: "a b" },
+        normalizing,
+      ),
+    ).toEqual({ equal: true });
+  });
+
+  it("compare() rejects an unsupported comparator major version", () => {
+    expect(() =>
+      comparator.compare(
+        { tag: "null" },
+        { tag: "null" },
+        { version: "exact-v2", equality: "semantic", normalizeWhitespace: false },
+      ),
+    ).toThrow();
+  });
 });
