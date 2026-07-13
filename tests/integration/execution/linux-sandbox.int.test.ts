@@ -79,6 +79,7 @@ describe.skipIf(!CAN_ENFORCE)("Linux sandbox integration", () => {
   it("classifies a wall-clock deadline as tle_wall", async () => {
     const raw = await sandbox!.run(
       sh("sleep 10"),
+      new Uint8Array(),
       limits({ wallTimeMs: 150, cpuTimeMs: 5000 }),
       new ManualCancellation(),
     );
@@ -93,6 +94,7 @@ describe.skipIf(!CAN_ENFORCE)("Linux sandbox integration", () => {
     const small = limits({ memoryBytes: 32 * 1024 * 1024, wallTimeMs: 5000 });
     const raw = await sandbox!.run(
       sh("exec dd if=/dev/zero of=/dev/null bs=1 2>/dev/null & python3 -c 'b=bytearray(1<<30)' 2>/dev/null || head -c 1000000000 /dev/zero | tr '\\0' 'a' >/dev/null"),
+      new Uint8Array(),
       small,
       new ManualCancellation(),
     );
@@ -112,6 +114,7 @@ describe.skipIf(!CAN_ENFORCE)("Linux sandbox integration", () => {
     });
     const raw = await sandbox!.run(
       sh("yes AAAAAAAA | head -c 1000000"),
+      new Uint8Array(),
       capped,
       new ManualCancellation(),
     );
@@ -125,6 +128,7 @@ describe.skipIf(!CAN_ENFORCE)("Linux sandbox integration", () => {
     // it. We give the child a short sleep so the wall deadline forces cleanup.
     const raw = await sandbox!.run(
       sh("(sleep 30 &) ; sleep 30"),
+      new Uint8Array(),
       limits({ wallTimeMs: 200 }),
       new ManualCancellation(),
     );
@@ -139,6 +143,7 @@ describe.skipIf(!CAN_ENFORCE)("Linux sandbox integration", () => {
     // SIGTERM→SIGKILL grace window is a sandbox-config concern, not a limit.
     const raw = await sandbox!.run(
       sh("trap '' TERM; while true; do :; done"),
+      new Uint8Array(),
       limits({ wallTimeMs: 200 }),
       new ManualCancellation(),
     );
@@ -149,6 +154,7 @@ describe.skipIf(!CAN_ENFORCE)("Linux sandbox integration", () => {
     const cancellation = new ManualCancellation();
     const promise = sandbox!.run(
       sh("sleep 30"),
+      new Uint8Array(),
       limits({ wallTimeMs: 10000 }),
       cancellation,
     );
@@ -160,6 +166,7 @@ describe.skipIf(!CAN_ENFORCE)("Linux sandbox integration", () => {
   it("resolves with spawn_failed for a missing executable (fails closed)", async () => {
     const raw = await sandbox!.run(
       { executable: "/nonexistent/program", args: [] },
+      new Uint8Array(),
       limits(),
       new ManualCancellation(),
     );

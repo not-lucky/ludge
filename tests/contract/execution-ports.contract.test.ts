@@ -187,6 +187,7 @@ describe("Sandbox contract", () => {
     async () => {
       const raw = await sandbox!.run(
         sh("exit 0"),
+        new Uint8Array(),
         contractLimits(),
         new ManualCancellation(),
       );
@@ -200,6 +201,7 @@ describe("Sandbox contract", () => {
     async () => {
       const raw = await sandbox!.run(
         sh("exit 7"),
+        new Uint8Array(),
         contractLimits(),
         new ManualCancellation(),
       );
@@ -213,6 +215,7 @@ describe("Sandbox contract", () => {
     async () => {
       const raw = await sandbox!.run(
         sh("yes AAAA | head -c 100000"),
+        new Uint8Array(),
         contractLimits(),
         new ManualCancellation(),
       );
@@ -226,6 +229,7 @@ describe("Sandbox contract", () => {
     async () => {
       const raw = await sandbox!.run(
         sh("sleep 10"),
+        new Uint8Array(),
         createResourceLimits({ ...contractLimits(), wallTimeMs: 150 }),
         new ManualCancellation(),
       );
@@ -240,6 +244,7 @@ describe("Sandbox contract", () => {
       const cancellation = new ManualCancellation();
       const promise = sandbox!.run(
         sh("sleep 30"),
+        new Uint8Array(),
         createResourceLimits({ ...contractLimits(), wallTimeMs: 10000 }),
         cancellation,
       );
@@ -256,6 +261,7 @@ describe("Sandbox contract", () => {
       // of process. `kill -9 $$` terminates the child via SIGKILL only.
       const raw = await sandbox!.run(
         sh("kill -9 $$"),
+        new Uint8Array(),
         contractLimits(),
         new ManualCancellation(),
       );

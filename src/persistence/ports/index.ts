@@ -15,9 +15,14 @@ export type { PersistenceRecords } from "./records.js";
 
 // Per-aggregate repository ports.
 export type {
+  ArtifactWriter,
   BenchmarkRepository,
+  CaseWriter,
+  ExecutionWriter,
+  ImplementationWriter,
   MetricsRepository,
   ProblemRepository,
+  ReplayWriter,
   RunRepository,
 } from "./repositories.js";
 

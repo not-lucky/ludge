@@ -11,7 +11,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { toRunId } from "../../src/domain/index.js";
 import type {
+  ArtifactWriter,
   BenchmarkRepository,
+  CaseWriter,
+  ExecutionWriter,
+  ImplementationWriter,
   MetricsRepository,
   PersistenceRecords,
   ProblemRepository,
@@ -23,6 +27,9 @@ import { TransactionAbortedError } from "../../src/persistence/sqlite/index.js";
 import {
   createTempStore,
   makeAggregate,
+  makeCase,
+  makeExecution,
+  makeImplementation,
   makeMetric,
   makeProblem,
   makeRun,
@@ -33,7 +40,11 @@ import type { TempStore } from "../fixtures/persistence/index.js";
 
 // Retain the type-only imports and verify the port surface exists.
 type _PortSurface = [
+  ArtifactWriter<PersistenceRecords>,
   BenchmarkRepository<PersistenceRecords>,
+  CaseWriter<PersistenceRecords>,
+  ExecutionWriter<PersistenceRecords>,
+  ImplementationWriter<PersistenceRecords>,
   MetricsRepository<PersistenceRecords>,
   ProblemRepository<PersistenceRecords>,
   RunRepository,
@@ -166,6 +177,68 @@ describe("MetricsRepository contract", () => {
 });
 
 describe("TransactionScope contract", () => {
+  it("does not leak transaction-only writers through the read store", () => {
+    expect(temp.store).not.toHaveProperty("implementations");
+    expect(temp.store).not.toHaveProperty("cases");
+    expect(temp.store).not.toHaveProperty("executions");
+    expect(temp.store).not.toHaveProperty("artifacts");
+  });
+
+  it("exposes transaction-only writers that commit the complete test run graph", async () => {
+    const problem = makeProblem();
+    const implementation = makeImplementation();
+    const run = makeRun();
+    const caseRecord = makeCase();
+    const execution = makeExecution();
+    const artifact = {
+      artifact_id: "artifact-0001",
+      run_id: "run-0001",
+      kind: "mismatch",
+      path: ".palestra/artifacts/artifact-0001.json",
+      sha256: "e".repeat(64),
+      size_bytes: 42n,
+      created_at: "2026-07-20T00:00:00.000Z",
+    };
+
+    await temp.store.transaction.transact(async (uow) => {
+      await uow.problems.register(problem);
+      await uow.implementations.register(implementation);
+      await uow.runs.commit(run);
+      await uow.cases.commit(caseRecord);
+      await uow.executions.commit(execution);
+      await uow.artifacts.commit(artifact);
+    });
+
+    const lines: string[] = [];
+    temp.store.export((line) => lines.push(line));
+    expect(lines.join("\n")).toContain('"implementation_id":"impl-0001"');
+    expect(lines.join("\n")).toContain('"case_id":"case-0001"');
+    expect(lines.join("\n")).toContain('"execution_id":"exec-0001"');
+    expect(lines.join("\n")).toContain('"artifact_id":"artifact-0001"');
+  });
+
+  it("rolls back transaction-only writer inserts with their parents", async () => {
+    const problem = makeProblem();
+    const implementation = makeImplementation();
+    const run = makeRun();
+    const caseRecord = makeCase();
+
+    await expect(
+      temp.store.transaction.transact(async (uow) => {
+        await uow.problems.register(problem);
+        await uow.implementations.register(implementation);
+        await uow.runs.commit(run);
+        await uow.cases.commit(caseRecord);
+        throw new Error("boom");
+      }),
+    ).rejects.toBeInstanceOf(TransactionAbortedError);
+
+    const lines: string[] = [];
+    temp.store.export((line) => lines.push(line));
+    expect(lines).toHaveLength(1); // Export metadata only; no persisted rows.
+    expect(lines.join("\n")).not.toContain('"run-0001"');
+  });
+
   it("transact() commits run + child records atomically on success", async () => {
     const problem = makeProblem();
     const run = makeRun();

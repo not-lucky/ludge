@@ -15,13 +15,17 @@
  * The bundle of record shapes owned by later tasks, exposed as generic slots.
  *
  * Each field is intentionally `unknown` here: task 03 must not know the concrete
- * persisted shapes, only that four distinct record kinds exist. A downstream
+ * persisted shapes, only the distinct record kinds. A downstream
  * task refines every slot at once by declaring an extending interface, e.g. task
  * 09 introduces
  *
  * ```ts
  * interface SqlitePersistenceRecords extends PersistenceRecords {
  *   readonly problem: ProblemRow;
+ *   readonly implementation: ImplementationRow;
+ *   readonly case: CaseRow;
+ *   readonly execution: ExecutionRow;
+ *   readonly artifact: ArtifactRow;
  *   readonly benchmarkSample: BenchmarkSampleRow;
  *   readonly benchmarkAggregate: BenchmarkAggregateRow;
  *   readonly metric: DailyMetricRow;
@@ -35,6 +39,16 @@
 export interface PersistenceRecords {
   /** The persisted problem record shape (refined by task 09). */
   readonly problem: unknown;
+  /** The persisted implementation record shape (refined by task 12). */
+  readonly implementation: unknown;
+  /** The persisted per-run case record shape (refined by task 12). */
+  readonly case: unknown;
+  /** The persisted per-case execution record shape (refined by task 12). */
+  readonly execution: unknown;
+  /** The persisted artifact record shape (refined by task 12). */
+  readonly artifact: unknown;
+  /** The immutable replay-link record shape (refined by task 13). */
+  readonly replay: unknown;
   /** The persisted per-sample benchmark record shape (refined by task 16). */
   readonly benchmarkSample: unknown;
   /** The persisted aggregated benchmark record shape (refined by task 16). */

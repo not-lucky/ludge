@@ -66,8 +66,8 @@ export function spawnChild(
     // New session + process group so the negative-PID signal reaches every
     // descendant, and no controlling terminal is shared.
     detached: true,
-    // Close stdin; keep stdout/stderr as the only inherited descriptors.
-    stdio: ["ignore", "pipe", "pipe"],
+    // The caller writes one bounded canonical request envelope and closes stdin.
+    stdio: ["pipe", "pipe", "pipe"],
     // Never route through a shell — the invocation is a resolved argv.
     shell: false,
   });

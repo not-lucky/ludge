@@ -65,6 +65,8 @@ export interface ResolvedAssets {
 
 /** The fully-resolved configuration a command executes against. */
 export interface EffectiveConfig {
+  /** Absolute real problem root used for runtime working-directory confinement. */
+  readonly problemRoot: string;
   /** The validated problem configuration this run targets. */
   readonly problem: ProblemConfig;
   /** The single, validated resource-limit set after all tiers merge. */
@@ -111,6 +113,7 @@ export function resolveEffectiveConfig(input: ResolveInput): EffectiveConfig {
   const unsafeLocal = resolveUnsafeLocal(cli.unsafeLocal ?? false);
 
   return Object.freeze({
+    problemRoot: context.problemRoot,
     problem,
     limits,
     limitsPolicyVersion: LIMITS_POLICY_VERSION,

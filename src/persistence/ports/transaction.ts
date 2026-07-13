@@ -4,8 +4,8 @@
  * This is the ONLY place where repository writes become durable, and they do so
  * atomically. Every write issued by the repositories inside a single `transact`
  * callback commits together or rolls back together, so a run and all of its
- * child records (cases, executions, benchmark samples/aggregates, metrics) form
- * one atomic unit. This is the "writes go through the transaction port" seam the
+ * child records (implementations, cases, executions, artifacts, benchmark
+ * samples/aggregates, metrics) form one atomic unit. This is the "writes go through the transaction port" seam the
  * spec refers to.
  *
  * This module is pure: no runtime, adapter, or Node import.
@@ -13,10 +13,15 @@
 
 import type { PersistenceRecords } from "./records.js";
 import type {
+  ArtifactWriter,
   BenchmarkRepository,
+  CaseWriter,
+  ExecutionWriter,
+  ImplementationWriter,
   MetricsRepository,
   ProblemRepository,
   RunRepository,
+  ReplayWriter,
 } from "./repositories.js";
 
 /**
@@ -33,6 +38,16 @@ export interface UnitOfWork<R extends PersistenceRecords> {
   readonly runs: RunRepository;
   /** Problems repository, scoped to the current transaction. */
   readonly problems: ProblemRepository<R>;
+  /** Implementation writer, scoped to the current transaction. */
+  readonly implementations: ImplementationWriter<R>;
+  /** Case writer, scoped to the current transaction. */
+  readonly cases: CaseWriter<R>;
+  /** Execution writer, scoped to the current transaction. */
+  readonly executions: ExecutionWriter<R>;
+  /** Artifact writer, scoped to the current transaction. */
+  readonly artifacts: ArtifactWriter<R>;
+  /** Immutable replay links, scoped to the current transaction. */
+  readonly replays: ReplayWriter<R>;
   /** Benchmarks repository, scoped to the current transaction. */
   readonly benchmarks: BenchmarkRepository<R>;
   /** Metrics repository, scoped to the current transaction. */

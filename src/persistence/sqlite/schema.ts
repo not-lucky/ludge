@@ -18,7 +18,7 @@ import type { SqliteConnection } from "./connection.js";
 import { SchemaVersionError } from "./errors.js";
 
 /** The schema version this build creates and understands. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /**
  * The persisted table names, in dependency order (parents before children).
@@ -36,6 +36,7 @@ export const TABLE_NAMES = [
   "benchmark_sample",
   "benchmark_aggregate",
   "artifact",
+  "replay",
   "daily_metric",
 ] as const;
 
@@ -192,6 +193,14 @@ CREATE TABLE artifact (
   created_at  TEXT    NOT NULL
 );
 
+CREATE TABLE replay (
+  replay_run_id      TEXT PRIMARY KEY REFERENCES run(run_id) ON DELETE CASCADE,
+  source_artifact_id TEXT NOT NULL REFERENCES artifact(artifact_id) ON DELETE RESTRICT,
+  created_at         TEXT NOT NULL
+);
+
+CREATE INDEX idx_replay_source_artifact ON replay (source_artifact_id);
+
 CREATE TABLE daily_metric (
   metric_date TEXT    NOT NULL,
   problem_id  TEXT    NOT NULL REFERENCES problem(problem_id) ON DELETE RESTRICT,
@@ -255,24 +264,35 @@ export function applySchema(db: SqliteConnection): void {
 }
 
 /**
- * Bring the database to schema v1, creating it when the file is fresh.
- *
- * - A brand-new (empty) database is initialized with {@link applySchema}.
- * - A database already at {@link SCHEMA_VERSION} is accepted unchanged.
- * - Any other version (an older populated database with `user_version = 0`, or
- *   a newer version this build does not understand) is refused.
+ * Bring the database to the current schema, creating it when fresh and
+ * migrating the schema-v1 release forward without rewriting existing tables.
  *
  * @param db - The writable connection to migrate.
  * @throws {SchemaVersionError} If the on-disk version is unknown or newer.
  */
 export function migrate(db: SqliteConnection): void {
   const version = readUserVersion(db);
-  if (version === SCHEMA_VERSION) {
-    return;
-  }
+  if (version === SCHEMA_VERSION) return;
   if (version === 0 && isEmptyDatabase(db)) {
     applySchema(db);
     return;
+  }
+  if (version === 1) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`CREATE TABLE replay (
+        replay_run_id TEXT PRIMARY KEY REFERENCES run(run_id) ON DELETE CASCADE,
+        source_artifact_id TEXT NOT NULL REFERENCES artifact(artifact_id) ON DELETE RESTRICT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_replay_source_artifact ON replay (source_artifact_id);
+      PRAGMA user_version = ${SCHEMA_VERSION}`);
+      db.exec("COMMIT");
+      return;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   }
   throw new SchemaVersionError(version, SCHEMA_VERSION);
 }

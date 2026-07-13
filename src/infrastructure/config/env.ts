@@ -41,6 +41,8 @@ export interface EnvOverrides {
   readonly paths: Partial<GlobalPaths>;
   /** Resource-limit defaults present in the environment (any subset). */
   readonly limits: ProblemLimitOverrides;
+  /** Optional total fuzz-artifact storage ceiling; omission means unlimited. */
+  readonly artifactStorageCapBytes: number | undefined;
 }
 
 /** Reserved environment names mapped to their {@link GlobalPaths} field. */
@@ -99,7 +101,12 @@ export function parseEnvOverrides(env: EnvironmentRecord): EnvOverrides {
     }
   }
 
-  return { paths, limits };
+  const rawArtifactCap = env.PALESTRA_ARTIFACT_STORAGE_CAP_BYTES;
+  const artifactStorageCapBytes = rawArtifactCap === undefined || rawArtifactCap.trim().length === 0
+    ? undefined
+    : parseEnvInt("PALESTRA_ARTIFACT_STORAGE_CAP_BYTES", rawArtifactCap.trim());
+
+  return { paths, limits, artifactStorageCapBytes };
 }
 
 /**

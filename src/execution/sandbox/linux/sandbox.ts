@@ -204,6 +204,7 @@ export function createLinuxSandbox<Tag extends string>(
 
     async run(
       invocation: ArgvInvocation,
+      input: Uint8Array,
       limits: ResourceLimits,
       cancellation: CancellationToken,
     ): Promise<RawProcessResult> {
@@ -253,6 +254,13 @@ export function createLinuxSandbox<Tag extends string>(
       }
 
       const exit = watchChild(child);
+      // The application has already canonicalized and bounded this exact
+      // request-envelope byte sequence. End stdin immediately after writing so
+      // the one-request JSONL harness can begin evaluation deterministically.
+      // A target can exit before consuming stdin; EPIPE is then an ordinary raw
+      // target fact, not an uncaught supervisor error.
+      child.stdin?.once("error", () => undefined);
+      child.stdin?.end(input);
       let killReason: KillReason | null = null;
       const requestTerminate = (reason: KillReason): void => {
         if (killReason === null) {

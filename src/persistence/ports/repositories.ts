@@ -92,6 +92,56 @@ export interface ProblemRepository<R extends PersistenceRecords> {
 }
 
 /**
+ * Transaction-only writer for implementation rows.
+ *
+ * Implementations deliberately have no general read repository yet: task 12
+ * only needs to register the implementation referenced by its executions.
+ * The writer is exposed exclusively by {@link UnitOfWork}.
+ *
+ * @typeParam R - The persistence record bundle fixing the concrete row shape.
+ */
+export interface ImplementationWriter<R extends PersistenceRecords> {
+  /** Register an implementation row in the enclosing transaction. */
+  register(implementation: R["implementation"]): Promise<void>;
+}
+
+/**
+ * Transaction-only writer for case rows.
+ *
+ * @typeParam R - The persistence record bundle fixing the concrete row shape.
+ */
+export interface CaseWriter<R extends PersistenceRecords> {
+  /** Commit a case row in the enclosing transaction. */
+  commit(caseRecord: R["case"]): Promise<void>;
+}
+
+/**
+ * Transaction-only writer for execution rows.
+ *
+ * @typeParam R - The persistence record bundle fixing the concrete row shape.
+ */
+export interface ExecutionWriter<R extends PersistenceRecords> {
+  /** Commit an execution row in the enclosing transaction. */
+  commit(execution: R["execution"]): Promise<void>;
+}
+
+/**
+ * Transaction-only writer for artifact rows.
+ *
+ * @typeParam R - The persistence record bundle fixing the concrete row shape.
+ */
+export interface ArtifactWriter<R extends PersistenceRecords> {
+  /** Commit an artifact row in the enclosing transaction. */
+  commit(artifact: R["artifact"]): Promise<void>;
+}
+
+/** Transaction-only writer of an immutable replay-to-source-artifact link. */
+export interface ReplayWriter<R extends PersistenceRecords> {
+  /** Commit a replay link in the same transaction as its new replay run. */
+  commit(replay: R["replay"]): Promise<void>;
+}
+
+/**
  * Port for persisting and querying benchmark samples and aggregates.
  *
  * Both stored shapes are deferred to task 16 via `R["benchmarkSample"]` and

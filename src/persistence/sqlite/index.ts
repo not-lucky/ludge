@@ -31,8 +31,13 @@ export type { PersistenceErrorReason } from "./errors.js";
 export type {
   BenchmarkAggregateRow,
   BenchmarkSampleRow,
+  ArtifactRow,
+  CaseRow,
   DailyMetricRow,
+  ExecutionRow,
+  ImplementationRow,
   ProblemRow,
+  ReplayRow,
   RunRow,
   SqliteBool,
   SqlitePersistenceRecords,
@@ -43,3 +48,12 @@ export { SCHEMA_VERSION } from "./schema.js";
 export { DATABASE_MODE } from "./durability.js";
 export { EXPORT_FORMAT_VERSION } from "./export.js";
 export type { JsonlSink } from "./export.js";
+
+// Transaction-only writer implementations, for adapter-level composition/tests.
+export { SqliteArtifactRepository } from "./repositories/artifact-repository.js";
+export { SqliteArtifactReaderRepository } from "./repositories/artifact-reader-repository.js";
+export { SqliteReplayRepository } from "./repositories/replay-repository.js";
+export { SqliteCaseRepository } from "./repositories/case-repository.js";
+export { SqliteExecutionRepository } from "./repositories/execution-repository.js";
+export { SqliteImplementationRepository } from "./repositories/implementation-repository.js";
+export { SqliteUnitOfWork } from "./unit-of-work.js";

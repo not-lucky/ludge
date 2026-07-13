@@ -15,6 +15,8 @@
  * This is an adapter module and uses Node builtins (via the connection seam).
  */
 
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type {
   BenchmarkRepository,
   MetricsRepository,
@@ -31,6 +33,7 @@ import type { FilesystemProbe } from "./filesystem-probe.js";
 import { assertLocalFilesystem } from "./filesystem-probe.js";
 import { runStartupRecovery } from "./recovery.js";
 import { applyRetention } from "./retention.js";
+import { SqliteArtifactReaderRepository } from "./repositories/artifact-reader-repository.js";
 import { SqliteBenchmarkRepository } from "./repositories/benchmark-repository.js";
 import { SqliteMetricsRepository } from "./repositories/metrics-repository.js";
 import { SqliteProblemRepository } from "./repositories/problem-repository.js";
@@ -68,6 +71,8 @@ export class SqliteStore {
 
   /** Read-only runs accessor (backed by the reader connection). */
   public readonly runs: RunRepository;
+  /** Read-only artifact lookup used by replay. */
+  public readonly artifactLookup: SqliteArtifactReaderRepository;
   /** Read-only problems accessor. */
   public readonly problems: ProblemRepository<SqlitePersistenceRecords>;
   /** Read-only benchmarks accessor. */
@@ -86,6 +91,7 @@ export class SqliteStore {
   ) {
     this.transaction = scope;
     this.runs = new SqliteRunRepository(reader);
+    this.artifactLookup = new SqliteArtifactReaderRepository(reader);
     this.problems = new SqliteProblemRepository(reader);
     this.benchmarks = new SqliteBenchmarkRepository(reader);
     this.metrics = new SqliteMetricsRepository(reader);
@@ -147,6 +153,9 @@ export class SqliteStore {
  * @throws {IntegrityCheckError} If startup integrity verification fails.
  */
 export function openSqliteStore(config: SqliteStoreConfig): SqliteStore {
+  // First use has no database directory yet. Create only the direct parent
+  // before probing it; the durability probe still rejects unprovable/network FS.
+  if (config.path !== ":memory:") mkdirSync(dirname(config.path), { recursive: true });
   assertLocalFilesystem(config.path, config.filesystemProbe);
 
   const writer = openWriter(config.path);

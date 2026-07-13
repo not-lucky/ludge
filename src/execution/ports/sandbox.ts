@@ -42,6 +42,8 @@ export interface Sandbox<Tag extends string = string> {
    */
   run(
     invocation: ArgvInvocation,
+    /** Exact canonical request-envelope bytes supplied to target stdin. */
+    input: Uint8Array,
     limits: ResourceLimits,
     cancellation: CancellationToken,
   ): Promise<RawProcessResult>;

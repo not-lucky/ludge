@@ -261,6 +261,16 @@ export interface ArtifactRow {
   readonly created_at: string;
 }
 
+/** Row of the immutable `replay` link table. */
+export interface ReplayRow {
+  /** New run produced by the replay (PK and FK -> run). */
+  readonly replay_run_id: string;
+  /** Source content-addressed artifact (FK -> artifact). */
+  readonly source_artifact_id: string;
+  /** Link creation timestamp. */
+  readonly created_at: string;
+}
+
 /** Row of the `environment` table. */
 export interface EnvironmentRow {
   /** Environment identity (PK). */
@@ -318,6 +328,16 @@ export interface DailyMetricRow {
 export interface SqlitePersistenceRecords extends PersistenceRecords {
   /** Problem records are {@link ProblemRow}s. */
   readonly problem: ProblemRow;
+  /** Implementation records are {@link ImplementationRow}s. */
+  readonly implementation: ImplementationRow;
+  /** Fixed-case records are {@link CaseRow}s. */
+  readonly case: CaseRow;
+  /** Per-case execution records are {@link ExecutionRow}s. */
+  readonly execution: ExecutionRow;
+  /** Artifact records are {@link ArtifactRow}s. */
+  readonly artifact: ArtifactRow;
+  /** Immutable replay-link records are {@link ReplayRow}s. */
+  readonly replay: ReplayRow;
   /** Per-sample benchmark records are {@link BenchmarkSampleRow}s. */
   readonly benchmarkSample: BenchmarkSampleRow;
   /** Aggregated benchmark records are {@link BenchmarkAggregateRow}s. */

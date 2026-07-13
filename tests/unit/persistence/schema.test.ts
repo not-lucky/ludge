@@ -1,5 +1,5 @@
 /**
- * Unit tests for schema v1 application and its enforced invariants.
+ * Unit tests for the current schema application and its enforced invariants.
  *
  * These drive a real, migrated database (via {@link createRawDb}) and assert the
  * structural guarantees the mappers and repositories rely on: the full table
@@ -22,7 +22,7 @@ import {
   seedGraphOn,
 } from "../../fixtures/persistence/index.js";
 
-describe("schema v1 application", () => {
+describe("schema application", () => {
   let raw: RawDb;
 
   beforeEach(() => {
@@ -33,14 +33,14 @@ describe("schema v1 application", () => {
     raw.cleanup();
   });
 
-  it("creates all ten tables and stamps the schema version", () => {
+  it("creates all current tables and stamps the schema version", () => {
     const tables = raw.db
       .prepare(
         "SELECT COUNT(*) AS n FROM sqlite_master " +
           "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
       )
       .get();
-    expect(Number(tables?.["n"])).toBe(10);
+    expect(Number(tables?.["n"])).toBe(11);
 
     const version = raw.db.prepare("PRAGMA user_version").get();
     expect(Number(version?.["user_version"])).toBe(SCHEMA_VERSION);
