@@ -6,9 +6,12 @@
  * can bind the supplied repository to its query-only reader.
  */
 
-import type { ExecutionStatus, PersistableRun } from "../domain/index.js";
-import type { RunRepository } from "../persistence/ports/repositories.js";
-import { isValidSlug } from "../infrastructure/config/slug.js";
+import type {
+  ExecutionStatus,
+  PersistableRun,
+  RunQuery,
+} from "../domain/index.js";
+import { isValidSlug } from "../infrastructure/problem.js";
 
 /** Query values consumed independently of the CLI parser. */
 export interface ReportInvocation {
@@ -29,17 +32,28 @@ export interface ReportRun {
   readonly inputCodecVersion: string;
   readonly outputCodecVersion: string;
   readonly comparisonPolicyVersion: string;
+  /** Benchmark comparability is present only for benchmark runs. */
+  readonly benchmark: {
+    readonly comparability: "comparable" | "non_comparable";
+    readonly reason: string | null;
+  } | null;
 }
 
 /** JSON-safe summary returned for both an empty and a populated report. */
 export interface ReportCommandResult {
-  readonly filters: { readonly slug: string | null; readonly since: string | null };
+  readonly filters: {
+    readonly slug: string | null;
+    readonly since: string | null;
+  };
   readonly runCount: number;
   readonly statusCounts: Readonly<Record<string, number>>;
   readonly runs: readonly ReportRun[];
 }
 
-export interface ReportDiagnostic { readonly code: string; readonly message: string; }
+export interface ReportDiagnostic {
+  readonly code: string;
+  readonly message: string;
+}
 
 export interface ReportApplicationOutcome {
   readonly status: "passed" | "invalid_input" | "internal_error";
@@ -47,9 +61,14 @@ export interface ReportApplicationOutcome {
   readonly diagnostics: readonly ReportDiagnostic[];
 }
 
+/** Read-only run history capability required by reporting. */
+export interface ReportRunReader {
+  list(query: RunQuery): AsyncIterable<PersistableRun>;
+}
+
 /** Report dependencies intentionally expose read access only. */
 export interface ReportCommandDependencies {
-  readonly runs: Pick<RunRepository, "list">;
+  readonly runs: ReportRunReader;
 }
 
 /** Stream matching persisted runs into a stable, JSON-safe history summary. */
@@ -64,8 +83,14 @@ export async function executeReportCommand(
 
   try {
     const runs: ReportRun[] = [];
-    const counts: Record<string, number> = Object.create(null) as Record<string, number>;
-    const since = invocation.since === undefined ? undefined : `${invocation.since}T00:00:00.000Z`;
+    const counts: Record<string, number> = Object.create(null) as Record<
+      string,
+      number
+    >;
+    const since =
+      invocation.since === undefined
+        ? undefined
+        : `${invocation.since}T00:00:00.000Z`;
     for await (const run of dependencies.runs.list({
       ...(invocation.slug === undefined ? {} : { slug: invocation.slug }),
       ...(since === undefined ? {} : { since }),
@@ -74,12 +99,19 @@ export async function executeReportCommand(
       counts[run.status] = (counts[run.status] ?? 0) + 1;
     }
     const statusCounts = Object.freeze(
-      Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right))),
+      Object.fromEntries(
+        Object.entries(counts).sort(([left], [right]) =>
+          left.localeCompare(right),
+        ),
+      ),
     );
     return Object.freeze({
       status: "passed",
       result: Object.freeze({
-        filters: Object.freeze({ slug: invocation.slug ?? null, since: invocation.since ?? null }),
+        filters: Object.freeze({
+          slug: invocation.slug ?? null,
+          since: invocation.since ?? null,
+        }),
         runCount: runs.length,
         statusCounts,
         runs: Object.freeze(runs),
@@ -108,7 +140,11 @@ function isCalendarDate(value: string): boolean {
   const month = Number(monthText);
   const day = Number(dayText);
   const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function project(run: PersistableRun): ReportRun {
@@ -123,6 +159,15 @@ function project(run: PersistableRun): ReportRun {
     inputCodecVersion: run.inputCodecVersion,
     outputCodecVersion: run.outputCodecVersion,
     comparisonPolicyVersion: run.comparisonPolicyVersion,
+    benchmark:
+      run.benchmark === undefined
+        ? null
+        : Object.freeze({
+            comparability: run.benchmark.comparable
+              ? "comparable"
+              : "non_comparable",
+            reason: run.benchmark.comparabilityReason,
+          }),
   });
 }
 

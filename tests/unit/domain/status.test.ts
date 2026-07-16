@@ -79,10 +79,7 @@ describe("ExecutionStatus literals", () => {
   it("contains exactly the 17 spec literals", () => {
     expect(new Set(ALL_STATUSES).size).toBe(17);
     expect([...ALL_STATUSES].sort()).toEqual(
-      [
-        ...TERMINATION_CAUSES,
-        ...NON_TERMINATION_STATUSES,
-      ].sort(),
+      [...TERMINATION_CAUSES, ...NON_TERMINATION_STATUSES].sort(),
     );
   });
 });
@@ -132,9 +129,7 @@ describe("statusSeverityRank", () => {
   });
 
   it("ranks increase monotonically down the tiers", () => {
-    const tierRanks = EXPECTED_TIERS.map((tier) =>
-      statusSeverityRank(tier[0]),
-    );
+    const tierRanks = EXPECTED_TIERS.map((tier) => statusSeverityRank(tier[0]));
     for (let i = 1; i < tierRanks.length; i += 1) {
       expect(tierRanks[i]).toBeGreaterThan(tierRanks[i - 1]);
     }
@@ -172,16 +167,16 @@ describe("compareStatusPrecedence", () => {
 
   it("returns 0 for statuses sharing a precedence tier", () => {
     expect(compareStatusPrecedence("tle_wall", "mle")).toBe(0);
-    expect(
-      compareStatusPrecedence("sandbox_unsupported", "spawn_error"),
-    ).toBe(0);
+    expect(compareStatusPrecedence("sandbox_unsupported", "spawn_error")).toBe(
+      0,
+    );
     expect(compareStatusPrecedence("passed", "passed")).toBe(0);
   });
 
   it("is antisymmetric in sign for cross-tier pairs", () => {
-    expect(
-      Math.sign(compareStatusPrecedence("sandbox_error", "passed")),
-    ).toBe(-Math.sign(compareStatusPrecedence("passed", "sandbox_error")));
+    expect(Math.sign(compareStatusPrecedence("sandbox_error", "passed"))).toBe(
+      -Math.sign(compareStatusPrecedence("passed", "sandbox_error")),
+    );
   });
 });
 
@@ -193,9 +188,9 @@ describe("mostSevere", () => {
   });
 
   it("picks the highest-severity cause from a mixed list", () => {
-    expect(
-      mostSevere("passed", "wrong_answer", "mle", "nonzero_exit"),
-    ).toBe("mle");
+    expect(mostSevere("passed", "wrong_answer", "mle", "nonzero_exit")).toBe(
+      "mle",
+    );
     expect(
       mostSevere("wrong_answer", "signaled", "sandbox_error", "protocol_error"),
     ).toBe("sandbox_error");

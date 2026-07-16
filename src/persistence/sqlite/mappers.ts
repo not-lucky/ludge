@@ -19,10 +19,7 @@ import type {
   RunQuery,
   TerminalRunState,
 } from "../../domain/index.js";
-import {
-  createResourceLimits,
-  toRunId,
-} from "../../domain/index.js";
+import { createResourceLimits, toRunId } from "../../domain/index.js";
 import type { ExecutionStatus } from "../../domain/index.js";
 import type { SqlParams, SqliteRow } from "./connection.js";
 import type { RunRow, SqliteBool } from "./rows.js";
@@ -45,7 +42,9 @@ const U64_DECIMAL = /^(?:0|[1-9][0-9]*)$/u;
 export function textCol(row: SqliteRow, name: string): string {
   const value = row[name];
   if (typeof value !== "string") {
-    throw new TypeError(`expected text column '${name}', got ${typeName(value)}`);
+    throw new TypeError(
+      `expected text column '${name}', got ${typeName(value)}`,
+    );
   }
   return value;
 }
@@ -57,7 +56,9 @@ export function nullableTextCol(row: SqliteRow, name: string): string | null {
     return null;
   }
   if (typeof value !== "string") {
-    throw new TypeError(`expected text column '${name}', got ${typeName(value)}`);
+    throw new TypeError(
+      `expected text column '${name}', got ${typeName(value)}`,
+    );
   }
   return value;
 }
@@ -71,7 +72,9 @@ export function intCol(row: SqliteRow, name: string): number {
   if (typeof value === "number") {
     return value;
   }
-  throw new TypeError(`expected integer column '${name}', got ${typeName(value)}`);
+  throw new TypeError(
+    `expected integer column '${name}', got ${typeName(value)}`,
+  );
 }
 
 /** Read a nullable integer column as `number | null`. */
@@ -92,7 +95,9 @@ export function bigIntCol(row: SqliteRow, name: string): bigint {
   if (typeof value === "number") {
     return BigInt(value);
   }
-  throw new TypeError(`expected integer column '${name}', got ${typeName(value)}`);
+  throw new TypeError(
+    `expected integer column '${name}', got ${typeName(value)}`,
+  );
 }
 
 /** Read a nullable 64-bit integer column as `bigint | null`. */
@@ -117,7 +122,9 @@ export function boolCol(row: SqliteRow, name: string): SqliteBool {
   if (asNumber === 1) {
     return 1;
   }
-  throw new TypeError(`expected boolean column '${name}' in {0,1,null}, got ${String(value)}`);
+  throw new TypeError(
+    `expected boolean column '${name}' in {0,1,null}, got ${String(value)}`,
+  );
 }
 
 /** Human-readable type name for error messages. */
@@ -223,7 +230,7 @@ export function runToRow(run: PersistableRun): RunRow {
     input_codec_version: run.inputCodecVersion,
     output_codec_version: run.outputCodecVersion,
     comparator_version: run.comparisonPolicyVersion,
-    methodology_version: null,
+    methodology_version: run.benchmark?.methodologyVersion ?? null,
     input_hash: run.inputHash,
     output_hash: run.outputHash,
     generation: run.generation,
@@ -231,12 +238,14 @@ export function runToRow(run: PersistableRun): RunRow {
     finished_at: null,
     duration_ms: run.durationMs,
     limits_json: serializeLimits(run.limits),
-    environment_id: null,
-    benchmark_warmups: null,
-    benchmark_sample_count: null,
-    benchmark_order_seed: null,
-    benchmark_comparability: null,
-    benchmark_comparability_reason: null,
+    environment_id: run.benchmark?.environmentId ?? null,
+    benchmark_warmups: run.benchmark?.warmups ?? null,
+    benchmark_sample_count: run.benchmark?.sampleCount ?? null,
+    benchmark_order_seed: run.benchmark?.orderSeed ?? null,
+    benchmark_plan_sha256: run.benchmark?.planSha256 ?? null,
+    benchmark_comparability:
+      run.benchmark === undefined ? null : run.benchmark.comparable ? 1 : 0,
+    benchmark_comparability_reason: run.benchmark?.comparabilityReason ?? null,
   };
 }
 
@@ -272,6 +281,7 @@ export function readRunRow(raw: SqliteRow): RunRow {
     benchmark_warmups: nullableIntCol(raw, "benchmark_warmups"),
     benchmark_sample_count: nullableIntCol(raw, "benchmark_sample_count"),
     benchmark_order_seed: nullableTextCol(raw, "benchmark_order_seed"),
+    benchmark_plan_sha256: nullableTextCol(raw, "benchmark_plan_sha256"),
     benchmark_comparability: boolCol(raw, "benchmark_comparability"),
     benchmark_comparability_reason: nullableTextCol(
       raw,
@@ -303,6 +313,20 @@ export function rowToRun(row: RunRow): PersistableRun {
     generation: row.generation as Generation,
     wallTimeUtc: row.started_at,
     durationMs: row.duration_ms,
+    ...(row.methodology_version === null
+      ? {}
+      : {
+          benchmark: {
+            methodologyVersion: row.methodology_version,
+            warmups: row.benchmark_warmups ?? 0,
+            sampleCount: row.benchmark_sample_count ?? 0,
+            orderSeed: row.benchmark_order_seed ?? "0",
+            planSha256: row.benchmark_plan_sha256 ?? "",
+            comparable: row.benchmark_comparability === 1,
+            comparabilityReason: row.benchmark_comparability_reason,
+            environmentId: row.environment_id ?? "",
+          },
+        }),
   };
 }
 
@@ -331,6 +355,7 @@ const RUN_COLUMNS: readonly (keyof RunRow)[] = [
   "benchmark_warmups",
   "benchmark_sample_count",
   "benchmark_order_seed",
+  "benchmark_plan_sha256",
   "benchmark_comparability",
   "benchmark_comparability_reason",
 ];

@@ -9,8 +9,10 @@
  * are handler data (`signaled`), never Node process crashes.
  */
 
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { ConfigError } from "../infrastructure/config/index.js";
+import { ProblemError } from "../infrastructure/problem.js";
+import { maybeCgroupReexec } from "./cgroup-reexec.js";
 import {
   dispatchCommand,
   parseCommand,
@@ -31,11 +33,7 @@ import {
   outcome,
   type CliOutcome,
 } from "./outcome.js";
-import {
-  processWriters,
-  renderOutcome,
-  type CliWriters,
-} from "./output.js";
+import { processWriters, renderOutcome, type CliWriters } from "./output.js";
 import type { RemoveSignalListener, ShutdownSignal } from "./shutdown.js";
 
 /** Injectable signal listener registration used by the asynchronous bootstrap. */
@@ -47,7 +45,9 @@ export type BootstrapSignalRegistrar = (
 /** Dependencies for deterministic bootstrap tests and alternate embeddings. */
 export interface BootstrapDependencies {
   /** Build the process resource owner. */
-  readonly createContext?: (dependencies?: AppContextDependencies) => AppContext;
+  readonly createContext?: (
+    dependencies?: AppContextDependencies,
+  ) => AppContext;
   /** Context constructor dependencies, used only by the default factory. */
   readonly contextDependencies?: AppContextDependencies;
   /** Output writers; defaults to Node stdout/stderr. */
@@ -108,11 +108,19 @@ export async function bootstrap(
     }
 
     const parsed = parseCommand(argv, dependencies.parser);
-    const mode = parsed.ok ? outputModeForCommand(parsed.command) : parsed.json ? "json" : "human";
+    const mode = parsed.ok
+      ? outputModeForCommand(parsed.command)
+      : parsed.json
+        ? "json"
+        : "human";
 
     if (signalReceived) {
       await signalDrain;
-      return renderOnce(mode, parsed.ok ? parsed.command : null, cancellationOutcome());
+      return renderOnce(
+        mode,
+        parsed.ok ? parsed.command : null,
+        cancellationOutcome(),
+      );
     }
     if (!parsed.ok) {
       return renderOnce(mode, null, parsed.outcome);
@@ -137,13 +145,22 @@ export async function bootstrap(
       await signalDrain;
       return renderOnce(mode, parsed.command, cancellationOutcome());
     }
-    return renderOnce(mode, parsed.command, labelUnsafeLocalOutcome(
-      "unsafeLocal" in parsed.command.options && parsed.command.options.unsafeLocal,
-      handled,
-    ));
+    return renderOnce(
+      mode,
+      parsed.command,
+      labelUnsafeLocalOutcome(
+        "unsafeLocal" in parsed.command.options &&
+          parsed.command.options.unsafeLocal,
+        handled,
+      ),
+    );
   } catch (error) {
     const command = null;
-    return renderOnce(jsonRequested ? "json" : "human", command, errorOutcome(error));
+    return renderOnce(
+      jsonRequested ? "json" : "human",
+      command,
+      errorOutcome(error),
+    );
   } finally {
     for (const remove of removers) {
       remove();
@@ -151,7 +168,11 @@ export async function bootstrap(
     // Signal shutdown owns normal cleanup ordering. Direct close is an
     // idempotent fallback for parse failures and ordinary completed commands.
     await context?.close();
-    if (context !== undefined && dependencies.createContext === undefined && dependencies.contextDependencies === undefined) {
+    if (
+      context !== undefined &&
+      dependencies.createContext === undefined &&
+      dependencies.contextDependencies === undefined
+    ) {
       releaseAppContext(context);
     }
   }
@@ -169,7 +190,7 @@ function errorOutcome(error: unknown): CliOutcome {
   // Configuration/path/schema errors are invalid user/problem data by contract,
   // even when a future application facade lets one escape rather than returning
   // its own outcome.
-  if (error instanceof ConfigError) {
+  if (error instanceof ProblemError) {
     return invalidInputOutcome(error.message, "configuration_error");
   }
   const normalized = normalizeCliError(error);
@@ -194,9 +215,19 @@ function registerNodeSignal(
 /** Execute only when Node invoked this module as the package binary. */
 if (
   process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
-  void bootstrap(process.argv.slice(2)).then((exitCode) => {
-    process.exitCode = exitCode;
-  });
+  // On Linux, check whether the current process lives in the same cgroup
+  // subtree as PALESTRA_CGROUP_PARENT.  If not, transparently re-exec
+  // under `systemd-run` in the correct slice so that child-PID migration
+  // into the sandbox cgroup is permitted by the kernel.  This must run
+  // before any async bootstrap work to avoid partially constructed state.
+  const reexecCode = maybeCgroupReexec(process.argv.slice(2));
+  if (reexecCode !== undefined) {
+    process.exitCode = reexecCode;
+  } else {
+    void bootstrap(process.argv.slice(2)).then((exitCode) => {
+      process.exitCode = exitCode;
+    });
+  }
 }

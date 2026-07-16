@@ -9,7 +9,11 @@ export class SqliteArtifactReaderRepository {
 
   /** Look up immutable artifact metadata by its content identifier. */
   public findById(artifactId: string): Promise<ArtifactRow | null> {
-    const row = this.db.prepare("SELECT * FROM artifact WHERE artifact_id = :artifact_id").get({ artifact_id: artifactId });
-    return Promise.resolve(row === undefined ? null : row as unknown as ArtifactRow);
+    const row = this.db
+      .prepare("SELECT * FROM artifact WHERE artifact_id = :artifact_id")
+      .get({ artifact_id: artifactId });
+    return Promise.resolve(
+      row === undefined ? null : (row as unknown as ArtifactRow),
+    );
   }
 }

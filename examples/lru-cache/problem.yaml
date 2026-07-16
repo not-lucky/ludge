@@ -1,0 +1,15 @@
+schemaVersion: 1
+slug: lru-cache
+title: LRU Cache
+entrypoint: solution.py
+limits: {}
+casesDir: cases
+class: LRUCache
+constructor: [int]
+methods:
+  put:
+    args: [int, int]
+    returns: null
+  get:
+    args: [int]
+    returns: int

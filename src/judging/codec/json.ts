@@ -26,7 +26,10 @@ export type JsonNode =
   | { readonly kind: "number"; readonly raw: string }
   | { readonly kind: "string"; readonly value: string }
   | { readonly kind: "array"; readonly items: readonly JsonNode[] }
-  | { readonly kind: "object"; readonly members: ReadonlyMap<string, JsonNode> };
+  | {
+      readonly kind: "object";
+      readonly members: ReadonlyMap<string, JsonNode>;
+    };
 
 /**
  * A structured description of where and why parsing failed.
@@ -397,7 +400,10 @@ class Parser {
       const keyStart = this.pos;
       const key = this.parseString();
       if (members.has(key)) {
-        throw new ParseAbort(`duplicate object key ${JSON.stringify(key)}`, keyStart);
+        throw new ParseAbort(
+          `duplicate object key ${JSON.stringify(key)}`,
+          keyStart,
+        );
       }
       this.skipWhitespace();
       if (this.peek() !== 0x3a) {

@@ -16,28 +16,32 @@ import {
   initialGeneration,
   toRunId,
 } from "../../../src/domain/index.js";
-import type { PersistableRun, ResourceLimits } from "../../../src/domain/index.js";
+import type {
+  PersistableRun,
+  ResourceLimits,
+} from "../../../src/domain/index.js";
 import type { SqliteConnection } from "../../../src/persistence/sqlite/connection.js";
 import { openWriter } from "../../../src/persistence/sqlite/connection.js";
 import { configureConnection } from "../../../src/persistence/sqlite/durability.js";
-import { runInsert, runToRow } from "../../../src/persistence/sqlite/mappers.js";
+import {
+  runInsert,
+  runToRow,
+} from "../../../src/persistence/sqlite/mappers.js";
 import { insertObject } from "../../../src/persistence/sqlite/row-io.js";
 import { migrate } from "../../../src/persistence/sqlite/schema.js";
-import { openSqliteStore } from "../../../src/persistence/sqlite/index.js";
+import { openSqliteStore } from "../../../src/persistence/sqlite/store.js";
 import type {
   SqliteStore,
   SqliteStoreConfig,
-} from "../../../src/persistence/sqlite/index.js";
+} from "../../../src/persistence/sqlite/store.js";
 import type {
   BenchmarkAggregateRow,
   BenchmarkSampleRow,
-  DailyMetricRow,
-  ProblemRow,
-} from "../../../src/persistence/sqlite/index.js";
-import type {
   CaseRow,
+  DailyMetricRow,
   ExecutionRow,
   ImplementationRow,
+  ProblemRow,
 } from "../../../src/persistence/sqlite/rows.js";
 
 /** A representative, well-formed set of resource limits. */
@@ -59,7 +63,9 @@ export function sampleLimits(): ResourceLimits {
 }
 
 /** Build a {@link PersistableRun}, overriding any fields for the scenario. */
-export function makeRun(overrides: Partial<PersistableRun> = {}): PersistableRun {
+export function makeRun(
+  overrides: Partial<PersistableRun> = {},
+): PersistableRun {
   return {
     runId: toRunId("run-0001"),
     slug: "two-sum",

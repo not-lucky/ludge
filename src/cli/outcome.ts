@@ -91,7 +91,10 @@ export function outcome<Result extends JsonValue>(
     result,
     diagnostics: Object.freeze(
       diagnostics.map((diagnostic) =>
-        Object.freeze({ ...diagnostic, message: boundDiagnostic(diagnostic.message) }),
+        Object.freeze({
+          ...diagnostic,
+          message: boundDiagnostic(diagnostic.message),
+        }),
       ),
     ),
   });
@@ -125,7 +128,11 @@ export function labelUnsafeLocalOutcome<Result extends JsonValue>(
   commandOutcome: CliOutcome<Result>,
 ): CliOutcome<Result> {
   return unsafeLocal
-    ? outcome("sandbox_unsupported", commandOutcome.result, commandOutcome.diagnostics)
+    ? outcome(
+        "sandbox_unsupported",
+        commandOutcome.result,
+        commandOutcome.diagnostics,
+      )
     : commandOutcome;
 }
 

@@ -8,9 +8,9 @@
 
 import { describe, it, expect } from "vitest";
 import { createTaggedJsonlV1Codec } from "../../../src/judging/codec/index.js";
-import type { CanonicalValue } from "../../../src/judging/value/index.js";
+import type { CanonicalValue } from "../../../src/judging/value/model.js";
 
-const codec = createTaggedJsonlV1Codec("test-backend");
+const codec = createTaggedJsonlV1Codec();
 
 /** Encode then decode, asserting success, and return the decoded value. */
 function roundTrip(value: CanonicalValue): CanonicalValue {
@@ -54,10 +54,7 @@ const cases: readonly [name: string, value: CanonicalValue][] = [
       ],
     },
   ],
-  [
-    "tuple",
-    { tag: "tuple", items: [{ tag: "bool", value: true }] },
-  ],
+  ["tuple", { tag: "tuple", items: [{ tag: "bool", value: true }] }],
   [
     "set (canonical order)",
     {
@@ -68,10 +65,7 @@ const cases: readonly [name: string, value: CanonicalValue][] = [
       ],
     },
   ],
-  [
-    "frozenset",
-    { tag: "frozenset", items: [{ tag: "str", value: "a" }] },
-  ],
+  ["frozenset", { tag: "frozenset", items: [{ tag: "str", value: "a" }] }],
   [
     "dict (canonical key order)",
     {
@@ -161,11 +155,7 @@ const cases: readonly [name: string, value: CanonicalValue][] = [
     "TreeNode",
     {
       tag: "TreeNode",
-      values: [
-        { tag: "int", value: 1n },
-        null,
-        { tag: "int", value: 2n },
-      ],
+      values: [{ tag: "int", value: 1n }, null, { tag: "int", value: 2n }],
     },
   ],
   [
@@ -205,8 +195,7 @@ describe("tagged-jsonl-v1 round-trip", () => {
 });
 
 describe("codec identity", () => {
-  it("exposes the bound backend id and version", () => {
-    expect(codec.backendId).toBe("test-backend");
+  it("exposes its fixed wire version", () => {
     expect(codec.version).toBe("tagged-jsonl-v1");
   });
 });

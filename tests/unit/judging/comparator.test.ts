@@ -15,7 +15,7 @@ import {
   isSupportedPolicyVersion,
   parsePolicyVersion,
 } from "../../../src/judging/comparator/index.js";
-import type { CanonicalValue } from "../../../src/judging/value/index.js";
+import type { CanonicalValue } from "../../../src/judging/value/model.js";
 import type { ComparisonPolicy } from "../../../src/domain/index.js";
 
 const comparator = createOutputComparator();
@@ -70,13 +70,22 @@ describe("exact-v1 semantic equality", () => {
       {
         tag: "dict",
         entries: [
-          { key: { tag: "int", value: 1n }, value: { tag: "str", value: "one" } },
+          {
+            key: { tag: "int", value: 1n },
+            value: { tag: "str", value: "one" },
+          },
         ],
       },
     ],
     [
       "set",
-      { tag: "set", items: [{ tag: "int", value: 1n }, { tag: "int", value: 2n }] },
+      {
+        tag: "set",
+        items: [
+          { tag: "int", value: 1n },
+          { tag: "int", value: 2n },
+        ],
+      },
     ],
     [
       "exception",
@@ -214,7 +223,10 @@ describe("exact-v1 numeric tolerance", () => {
 
   it("does NOT relax container shape (list length)", () => {
     const { reason } = expectMismatch(
-      { tag: "list", items: [{ tag: "float", value: "1", negativeZero: false }] },
+      {
+        tag: "list",
+        items: [{ tag: "float", value: "1", negativeZero: false }],
+      },
       { tag: "list", items: [] },
       tol(100, 100),
     );
@@ -254,12 +266,18 @@ describe("exact-v1 canonical byte equality", () => {
   it("treats values with identical canonical form as equal", () => {
     const value: CanonicalValue = {
       tag: "set",
-      items: [{ tag: "int", value: 2n }, { tag: "int", value: 1n }],
+      items: [
+        { tag: "int", value: 2n },
+        { tag: "int", value: 1n },
+      ],
     };
     // Same logical set, differing input order → identical canonical bytes.
     const reordered: CanonicalValue = {
       tag: "set",
-      items: [{ tag: "int", value: 1n }, { tag: "int", value: 2n }],
+      items: [
+        { tag: "int", value: 1n },
+        { tag: "int", value: 2n },
+      ],
     };
     expectEqual(value, reordered, bytesPolicy);
   });
@@ -278,7 +296,10 @@ describe("exact-v1 canonical byte equality", () => {
     expectMismatch(
       { tag: "float", value: "1", negativeZero: false },
       { tag: "float", value: "1.001", negativeZero: false },
-      policy({ equality: "canonical_bytes", tolerance: { absolute: 1, relative: 1 } }),
+      policy({
+        equality: "canonical_bytes",
+        tolerance: { absolute: 1, relative: 1 },
+      }),
     );
   });
 });

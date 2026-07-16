@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { TelemetryEvent } from "../../../src/telemetry/index.js";
-import { SafeTelemetryPublisher } from "../../../src/telemetry/index.js";
-import type { TelemetrySink } from "../../../src/telemetry/ports/index.js";
+import {
+  publishSafely,
+  type TelemetryEvent,
+} from "../../../src/telemetry/index.js";
+import type { TelemetrySink } from "../../../src/telemetry/ports/sink.js";
 
 const event: TelemetryEvent = {
   schemaVersion: 1,
@@ -17,30 +19,27 @@ const event: TelemetryEvent = {
   data: {},
 };
 
-describe("SafeTelemetryPublisher", () => {
+describe("publishSafely", () => {
   it("delivers facts in submit order", () => {
     const received: string[] = [];
-    const sink: TelemetrySink<TelemetryEvent> = { emit: (item) => received.push(item.event) };
-    const publisher = new SafeTelemetryPublisher([sink]);
-
-    publisher.emit(event);
-    publisher.emit({ ...event, event: "execution.finished" });
-
+    const sink: TelemetrySink<TelemetryEvent> = {
+      emit: (item) => received.push(item.event),
+    };
+    publishSafely([sink], event);
+    publishSafely([sink], { ...event, event: "execution.finished" });
     expect(received).toEqual(["command.finished", "execution.finished"]);
   });
 
-  it("contains observer failures and reports a bounded warning", () => {
+  it("contains observer failures", () => {
     const warnings: string[] = [];
     const throwing: TelemetrySink<TelemetryEvent> = {
-      emit: () => { throw new Error("sink unavailable"); },
+      emit: () => {
+        throw new Error("sink unavailable");
+      },
     };
-    let verdict = "passed";
-    const publisher = new SafeTelemetryPublisher([throwing], (warning) => warnings.push(warning.message));
-
-    publisher.emit(event);
-    verdict = "passed";
-
-    expect(verdict).toBe("passed");
+    publishSafely([throwing], event, (warning) =>
+      warnings.push(warning.message),
+    );
     expect(warnings).toEqual(["telemetry sink failed: sink unavailable"]);
   });
 });

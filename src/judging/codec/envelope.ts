@@ -110,7 +110,12 @@ class EnvelopeReject extends Error {
  * @throws {CodecEncodeError} If framing metadata or the input value is invalid.
  */
 export function encodeRequestLine(env: RequestEnvelope): Uint8Array {
-  validateFramingForEncode(env.runId, env.caseId, env.codecVersion, env.messageLimitBytes);
+  validateFramingForEncode(
+    env.runId,
+    env.caseId,
+    env.codecVersion,
+    env.messageLimitBytes,
+  );
   const line = objectText([
     ["caseId", jsonString(env.caseId)],
     ["codecVersion", jsonString(env.codecVersion)],
@@ -131,7 +136,12 @@ export function encodeRequestLine(env: RequestEnvelope): Uint8Array {
  * @throws {CodecEncodeError} If framing metadata or the payload is invalid.
  */
 export function encodeResponseLine(env: ResponseEnvelope): Uint8Array {
-  validateFramingForEncode(env.runId, env.caseId, env.codecVersion, env.messageLimitBytes);
+  validateFramingForEncode(
+    env.runId,
+    env.caseId,
+    env.codecVersion,
+    env.messageLimitBytes,
+  );
   const hasOutput = env.output !== null;
   const hasException = env.exception !== null;
   if (hasOutput === hasException) {
@@ -142,10 +152,18 @@ export function encodeResponseLine(env: ResponseEnvelope): Uint8Array {
   const line = objectText([
     ["caseId", jsonString(env.caseId)],
     ["codecVersion", jsonString(env.codecVersion)],
-    ["exception", env.exception === null ? "null" : encodeValue(env.exception, new Budget())],
+    [
+      "exception",
+      env.exception === null
+        ? "null"
+        : encodeValue(env.exception, new Budget()),
+    ],
     ["kind", '"response"'],
     ["messageLimitBytes", String(env.messageLimitBytes)],
-    ["output", env.output === null ? "null" : encodeValue(env.output, new Budget())],
+    [
+      "output",
+      env.output === null ? "null" : encodeValue(env.output, new Budget()),
+    ],
     ["protocolVersion", String(PROTOCOL_VERSION)],
     ["runId", jsonString(env.runId)],
   ]);
@@ -243,9 +261,7 @@ export function decodeResponseLine(
       );
     }
     const output = hasOutput ? buildOrReject(outputNode, "$.output") : null;
-    const exception = hasException
-      ? buildException(exceptionNode)
-      : null;
+    const exception = hasException ? buildException(exceptionNode) : null;
     return {
       ok: true,
       envelope: {
@@ -277,7 +293,9 @@ function frameToObject(bytes: Uint8Array): ReadonlyMap<string, JsonNode> {
   const line = singleLine(text);
   const parsed = parseJson(line);
   if (!parsed.ok) {
-    throw new EnvelopeReject(`malformed envelope JSON: ${parsed.error.message}`);
+    throw new EnvelopeReject(
+      `malformed envelope JSON: ${parsed.error.message}`,
+    );
   }
   if (parsed.node.kind !== "object") {
     throw new EnvelopeReject("envelope must be a JSON object");
@@ -333,14 +351,16 @@ function readMessageLimit(
   messageBytes: number,
 ): number {
   const node = members.get("messageLimitBytes");
-  if (node === undefined || node.kind !== "number" || !/^[1-9][0-9]*$/.test(node.raw)) {
+  if (
+    node === undefined ||
+    node.kind !== "number" ||
+    !/^[1-9][0-9]*$/.test(node.raw)
+  ) {
     throw new EnvelopeReject("messageLimitBytes must be a positive integer");
   }
   const limit = Number(node.raw);
   if (limit > MAX_PAYLOAD_BYTES) {
-    throw new EnvelopeReject(
-      `messageLimitBytes exceeds ${MAX_PAYLOAD_BYTES}`,
-    );
+    throw new EnvelopeReject(`messageLimitBytes exceeds ${MAX_PAYLOAD_BYTES}`);
   }
   if (messageBytes > limit) {
     throw new EnvelopeReject("message exceeds messageLimitBytes");
@@ -421,10 +441,17 @@ function buildException(node: JsonNode): ExceptionValue {
 function toErrorResult<T>(err: unknown): EnvelopeDecodeResult<T> {
   if (err instanceof EnvelopeReject) {
     return err.path === undefined
-      ? { ok: false, error: { message: err.message, category: "protocol_error" } }
+      ? {
+          ok: false,
+          error: { message: err.message, category: "protocol_error" },
+        }
       : {
           ok: false,
-          error: { message: err.message, category: "protocol_error", path: err.path },
+          error: {
+            message: err.message,
+            category: "protocol_error",
+            path: err.path,
+          },
         };
   }
   throw err;

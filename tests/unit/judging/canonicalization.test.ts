@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import { createTaggedJsonlV1Codec } from "../../../src/judging/codec/index.js";
-import type { CanonicalValue } from "../../../src/judging/value/index.js";
+import type { CanonicalValue } from "../../../src/judging/value/model.js";
 
 const codec = createTaggedJsonlV1Codec("test-backend");
 
@@ -88,7 +88,7 @@ describe("dict canonicalization", () => {
 });
 
 describe("float negative zero", () => {
-  it("carries -0.0 as value \"0\" with negativeZero true", () => {
+  it('carries -0.0 as value "0" with negativeZero true', () => {
     expect(text({ tag: "float", value: "0", negativeZero: true })).toBe(
       '{"negativeZero":true,"tag":"float","value":"0"}',
     );

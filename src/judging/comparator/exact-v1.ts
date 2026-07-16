@@ -17,11 +17,7 @@
  */
 
 import type { CanonicalValue } from "../value/model.js";
-import type { OutputComparator } from "../ports/index.js";
-import type {
-  ComparisonPolicy,
-  ComparisonResult,
-} from "../../domain/index.js";
+import type { ComparisonPolicy, ComparisonResult } from "../../domain/index.js";
 import { canonicalStringOf } from "../codec/encode.js";
 import { renderValue } from "./render.js";
 import { semanticMismatch } from "./semantic.js";
@@ -55,7 +51,7 @@ export function compareExactV1(
  *
  * @returns An `exact-v1` output comparator over {@link CanonicalValue}.
  */
-export function createExactV1Comparator(): OutputComparator<CanonicalValue> {
+export function createExactV1Comparator() {
   return { compare: compareExactV1 };
 }
 

@@ -12,7 +12,17 @@
  * a foreign launcher at the type level.
  */
 
-import type { Codec, DecodeResult } from "../ports/index.js";
+export type DecodeResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly error: { readonly message: string; readonly path?: string };
+    };
+
+interface Codec<T> {
+  encode(value: T): Uint8Array;
+  decode(bytes: Uint8Array): DecodeResult<T>;
+}
 import type { CanonicalValue } from "../value/model.js";
 import { Budget, MAX_PAYLOAD_BYTES } from "./limits.js";
 import { CanonicalValidationError } from "./errors.js";
@@ -33,8 +43,7 @@ export const SUPPORTED_CODEC_MAJOR = 1;
  * The version lets envelope readers reject unsupported major versions and
  * migrate supported minor ones (see {@link parseCodecVersion}).
  */
-export interface VersionedCodec<TValue, Tag extends string = string>
-  extends Codec<TValue, Tag> {
+export interface VersionedCodec<TValue> extends Codec<TValue> {
   /** The codec version identifier, e.g. `"tagged-jsonl-v1"`. */
   readonly version: string;
 }
@@ -82,11 +91,8 @@ export function isSupportedCodecVersion(version: string): boolean {
  * @param backendId - The backend this codec belongs to.
  * @returns A versioned codec over {@link CanonicalValue}.
  */
-export function createTaggedJsonlV1Codec<Tag extends string>(
-  backendId: Tag,
-): VersionedCodec<CanonicalValue, Tag> {
+export function createTaggedJsonlV1Codec(): VersionedCodec<CanonicalValue> {
   return {
-    backendId,
     version: CODEC_VERSION,
 
     encode(value: CanonicalValue): Uint8Array {

@@ -1,29 +1,8 @@
-/**
- * Contract tests for the persistence ports, driven by the real SQLite adapter.
- *
- * Each suite pins an obligation any concrete implementation must satisfy and
- * exercises it against a temp-file {@link SqliteStore} instantiated at
- * {@link SqlitePersistenceRecords}: round-trips, query filtering, ordinal
- * ordering, upsert idempotence, and transactional atomicity. Writes go through
- * the transaction seam; reads go through the store's read-only accessors.
- */
+/** Direct SQLite transaction and query behavior. */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { toRunId } from "../../src/domain/index.js";
-import type {
-  ArtifactWriter,
-  BenchmarkRepository,
-  CaseWriter,
-  ExecutionWriter,
-  ImplementationWriter,
-  MetricsRepository,
-  PersistenceRecords,
-  ProblemRepository,
-  RunRepository,
-  TransactionScope,
-  UnitOfWork,
-} from "../../src/persistence/ports/index.js";
-import { TransactionAbortedError } from "../../src/persistence/sqlite/index.js";
+import { TransactionAbortedError } from "../../src/persistence/sqlite/errors.js";
 import {
   createTempStore,
   makeAggregate,
@@ -37,20 +16,6 @@ import {
   seedRunGraph,
 } from "../fixtures/persistence/index.js";
 import type { TempStore } from "../fixtures/persistence/index.js";
-
-// Retain the type-only imports and verify the port surface exists.
-type _PortSurface = [
-  ArtifactWriter<PersistenceRecords>,
-  BenchmarkRepository<PersistenceRecords>,
-  CaseWriter<PersistenceRecords>,
-  ExecutionWriter<PersistenceRecords>,
-  ImplementationWriter<PersistenceRecords>,
-  MetricsRepository<PersistenceRecords>,
-  ProblemRepository<PersistenceRecords>,
-  RunRepository,
-  TransactionScope<PersistenceRecords>,
-  UnitOfWork<PersistenceRecords>,
-];
 
 /** Drain an async iterable into an array. */
 async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
@@ -71,7 +36,7 @@ afterEach(() => {
   temp.cleanup();
 });
 
-describe("RunRepository contract", () => {
+describe("SQLite run queries", () => {
   it("commit() then findById() returns the identical persisted run", async () => {
     const run = makeRun({ seed: "42" });
     await temp.store.transaction.transact((uow) => uow.runs.commit(run));
@@ -87,8 +52,12 @@ describe("RunRepository contract", () => {
 
   it("list() streams matching runs and applies the query filters", async () => {
     await temp.store.transaction.transact(async (uow) => {
-      await uow.runs.commit(makeRun({ runId: toRunId("run-a"), slug: "two-sum" }));
-      await uow.runs.commit(makeRun({ runId: toRunId("run-b"), slug: "other" }));
+      await uow.runs.commit(
+        makeRun({ runId: toRunId("run-a"), slug: "two-sum" }),
+      );
+      await uow.runs.commit(
+        makeRun({ runId: toRunId("run-b"), slug: "other" }),
+      );
     });
 
     const bySlug = await collect(temp.store.runs.list({ slug: "two-sum" }));
@@ -106,7 +75,7 @@ describe("RunRepository contract", () => {
   });
 });
 
-describe("ProblemRepository contract", () => {
+describe("SQLite problem queries", () => {
   it("register() then findBySlug() returns the registered problem", async () => {
     const problem = makeProblem();
     await temp.store.transaction.transact((uow) =>
@@ -121,7 +90,7 @@ describe("ProblemRepository contract", () => {
   });
 });
 
-describe("BenchmarkRepository contract", () => {
+describe("SQLite benchmark queries", () => {
   beforeEach(() => {
     seedRunGraph(temp.path);
   });
@@ -154,7 +123,7 @@ describe("BenchmarkRepository contract", () => {
   });
 });
 
-describe("MetricsRepository contract", () => {
+describe("SQLite metric queries", () => {
   beforeEach(async () => {
     await temp.store.transaction.transact((uow) =>
       uow.problems.register(makeProblem()),
@@ -176,7 +145,7 @@ describe("MetricsRepository contract", () => {
   });
 });
 
-describe("TransactionScope contract", () => {
+describe("SQLite transactions", () => {
   it("does not leak transaction-only writers through the read store", () => {
     expect(temp.store).not.toHaveProperty("implementations");
     expect(temp.store).not.toHaveProperty("cases");

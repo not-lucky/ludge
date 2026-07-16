@@ -69,7 +69,11 @@ function runHarness(
     [HARNESS, "--role", role, "--impl", impl, "--entry", entry],
     { cwd: REPO_ROOT, input: Buffer.from(requestBytes) },
   );
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
 }
 
 /** Encode `input`, run `echo.solve`, and decode the resulting output value. */
@@ -141,10 +145,28 @@ describe.skipIf(!PYTHON_AVAILABLE)("python harness round-trip", () => {
       className: "LRUCache",
       constructor: [{ tag: "int", value: 2n }],
       operations: [
-        { method: "put", args: [{ tag: "int", value: 1n }, { tag: "int", value: 1n }] },
-        { method: "put", args: [{ tag: "int", value: 2n }, { tag: "int", value: 2n }] },
+        {
+          method: "put",
+          args: [
+            { tag: "int", value: 1n },
+            { tag: "int", value: 1n },
+          ],
+        },
+        {
+          method: "put",
+          args: [
+            { tag: "int", value: 2n },
+            { tag: "int", value: 2n },
+          ],
+        },
         { method: "get", args: [{ tag: "int", value: 1n }] },
-        { method: "put", args: [{ tag: "int", value: 3n }, { tag: "int", value: 3n }] },
+        {
+          method: "put",
+          args: [
+            { tag: "int", value: 3n },
+            { tag: "int", value: 3n },
+          ],
+        },
         { method: "get", args: [{ tag: "int", value: 2n }] },
       ],
     };
@@ -164,6 +186,7 @@ describe.skipIf(!PYTHON_AVAILABLE)("python harness round-trip", () => {
       items: [
         { tag: "null" },
         { tag: "null" },
+        { tag: "null" },
         { tag: "int", value: 1n },
         { tag: "null" },
         { tag: "int", value: -1n },
@@ -178,7 +201,10 @@ describe.skipIf(!PYTHON_AVAILABLE)("python harness round-trip", () => {
       "solve",
       encodeRequestLine(request({ tag: "null" })),
     );
-    expect(output.status, `harness stderr: ${output.stderr.toString("utf8")}`).toBe(0);
+    expect(
+      output.status,
+      `harness stderr: ${output.stderr.toString("utf8")}`,
+    ).toBe(0);
     const decoded = decodeResponseLine(new Uint8Array(output.stdout), EXPECTED);
     if (!decoded.ok) {
       throw new Error(`response decode failed: ${decoded.error.message}`);

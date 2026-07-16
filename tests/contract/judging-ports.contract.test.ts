@@ -1,32 +1,16 @@
-/**
- * Contract-test scaffold for the judging ports.
- *
- * These suites enumerate the obligations any concrete {@link Codec} and
- * {@link OutputComparator} must satisfy. They are `todo` placeholders: task 04
- * (canonical codec) and task 05 (comparators) supply fixtures that drive these
- * obligations against real implementations.
- */
+/** Direct tagged-JSONL codec and exact-comparator behavior. */
 
 import { describe, it, expect } from "vitest";
-import type {
-  Codec,
-  DecodeResult,
-  OutputComparator,
-} from "../../src/judging/ports/index.js";
-import { createTaggedJsonlV1Codec } from "../../src/judging/codec/index.js";
+import {
+  createTaggedJsonlV1Codec,
+  type VersionedCodec,
+} from "../../src/judging/codec/tagged-jsonl-v1.js";
 import { createOutputComparator } from "../../src/judging/comparator/index.js";
-import type { CanonicalValue } from "../../src/judging/value/index.js";
-import type { ComparisonPolicy } from "../../src/domain/index.js";
+import type { CanonicalValue } from "../../src/judging/value/model.js";
+import type { ComparisonPolicy } from "../../src/domain/comparison.js";
 
-// Retain the type-only imports and verify the port surface exists.
-type _PortSurface = [
-  Codec<unknown>,
-  DecodeResult<unknown>,
-  OutputComparator<unknown>,
-];
-
-describe("Codec contract", () => {
-  const codec: Codec<CanonicalValue> = createTaggedJsonlV1Codec("backend");
+describe("tagged JSONL codec", () => {
+  const codec: VersionedCodec<CanonicalValue> = createTaggedJsonlV1Codec();
 
   it("encode() then decode() round-trips a canonical value exactly", () => {
     const value: CanonicalValue = {
@@ -69,8 +53,8 @@ describe("Codec contract", () => {
   });
 });
 
-describe("OutputComparator contract", () => {
-  const comparator: OutputComparator<CanonicalValue> = createOutputComparator();
+describe("exact output comparator", () => {
+  const comparator = createOutputComparator();
   const semantic: ComparisonPolicy = {
     version: "exact-v1",
     equality: "semantic",
@@ -117,8 +101,16 @@ describe("OutputComparator contract", () => {
       normalizeWhitespace: false,
       tolerance: { absolute: 0.01, relative: 0 },
     };
-    const near: CanonicalValue = { tag: "float", value: "1.005", negativeZero: false };
-    const base: CanonicalValue = { tag: "float", value: "1", negativeZero: false };
+    const near: CanonicalValue = {
+      tag: "float",
+      value: "1.005",
+      negativeZero: false,
+    };
+    const base: CanonicalValue = {
+      tag: "float",
+      value: "1",
+      negativeZero: false,
+    };
     expect(comparator.compare(base, near, tolerant)).toEqual({ equal: true });
 
     // The same tolerance must not relax integers.
@@ -150,7 +142,11 @@ describe("OutputComparator contract", () => {
       comparator.compare(
         { tag: "null" },
         { tag: "null" },
-        { version: "exact-v2", equality: "semantic", normalizeWhitespace: false },
+        {
+          version: "exact-v2",
+          equality: "semantic",
+          normalizeWhitespace: false,
+        },
       ),
     ).toThrow();
   });

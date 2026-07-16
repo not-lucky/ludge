@@ -10,15 +10,12 @@
  * This is an adapter module; it imports the driver only as a type.
  */
 
-import type { ProblemRepository } from "../../ports/index.js";
 import type { SqliteConnection } from "../connection.js";
 import { insertObject, readProblemRow } from "../row-io.js";
-import type { ProblemRow, SqlitePersistenceRecords } from "../rows.js";
+import type { ProblemRow } from "../rows.js";
 
 /** A {@link ProblemRepository} backed by a single SQLite connection. */
-export class SqliteProblemRepository
-  implements ProblemRepository<SqlitePersistenceRecords>
-{
+export class SqliteProblemRepository {
   /**
    * @param db - The bound connection (writer inside a transaction, else reader).
    */

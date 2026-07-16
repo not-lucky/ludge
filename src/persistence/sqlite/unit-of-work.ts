@@ -12,21 +12,20 @@
  * This is an adapter module; it imports the driver only as a type.
  */
 
-import type { UnitOfWork } from "../ports/index.js";
 import type { SqliteConnection } from "./connection.js";
 import { SqliteArtifactRepository } from "./repositories/artifact-repository.js";
 import { SqliteBenchmarkRepository } from "./repositories/benchmark-repository.js";
 import { SqliteCaseRepository } from "./repositories/case-repository.js";
 import { SqliteExecutionRepository } from "./repositories/execution-repository.js";
+import { SqliteEnvironmentRepository } from "./repositories/environment-repository.js";
 import { SqliteImplementationRepository } from "./repositories/implementation-repository.js";
 import { SqliteMetricsRepository } from "./repositories/metrics-repository.js";
 import { SqliteProblemRepository } from "./repositories/problem-repository.js";
 import { SqliteReplayRepository } from "./repositories/replay-repository.js";
 import { SqliteRunRepository } from "./repositories/run-repository.js";
-import type { SqlitePersistenceRecords } from "./rows.js";
 
-/** A {@link UnitOfWork} whose repositories share one writer connection. */
-export class SqliteUnitOfWork implements UnitOfWork<SqlitePersistenceRecords> {
+/** Concrete transaction methods sharing one writer connection. */
+export class SqliteTransaction {
   /** Runs repository, scoped to the current transaction. */
   public readonly runs: SqliteRunRepository;
   /** Problems repository, scoped to the current transaction. */
@@ -41,6 +40,8 @@ export class SqliteUnitOfWork implements UnitOfWork<SqlitePersistenceRecords> {
   public readonly artifacts: SqliteArtifactRepository;
   /** Immutable replay links, scoped to the current transaction. */
   public readonly replays: SqliteReplayRepository;
+  /** Benchmark environment records, scoped to the current transaction. */
+  public readonly environments: SqliteEnvironmentRepository;
   /** Benchmarks repository, scoped to the current transaction. */
   public readonly benchmarks: SqliteBenchmarkRepository;
   /** Metrics repository, scoped to the current transaction. */
@@ -57,6 +58,7 @@ export class SqliteUnitOfWork implements UnitOfWork<SqlitePersistenceRecords> {
     this.executions = new SqliteExecutionRepository(db);
     this.artifacts = new SqliteArtifactRepository(db);
     this.replays = new SqliteReplayRepository(db);
+    this.environments = new SqliteEnvironmentRepository(db);
     this.benchmarks = new SqliteBenchmarkRepository(db);
     this.metrics = new SqliteMetricsRepository(db);
   }

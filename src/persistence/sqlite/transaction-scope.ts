@@ -13,22 +13,14 @@
  * This is an adapter module; it imports the driver only as a type.
  */
 
-import type { TransactionScope, UnitOfWork } from "../ports/index.js";
 import type { SqliteConnection } from "./connection.js";
 import { TransactionAbortedError } from "./errors.js";
-import type { SqlitePersistenceRecords } from "./rows.js";
-import { SqliteUnitOfWork } from "./unit-of-work.js";
-import type {
-  BusyRetryOptions,
-  Sleeper,
-  WriterQueue,
-} from "./writer-queue.js";
+import { SqliteTransaction } from "./unit-of-work.js";
+import type { BusyRetryOptions, Sleeper, WriterQueue } from "./writer-queue.js";
 import { DEFAULT_BUSY_RETRY, withBusyRetry } from "./writer-queue.js";
 
 /** A {@link TransactionScope} backed by one serialized writer connection. */
-export class SqliteTransactionScope
-  implements TransactionScope<SqlitePersistenceRecords>
-{
+export class SqliteTransactionScope {
   /**
    * @param db - The single writer connection all transactions run on.
    * @param queue - The process-local queue serializing every writer.
@@ -49,9 +41,7 @@ export class SqliteTransactionScope
    * @param work - Callback receiving the transaction-scoped repositories.
    * @returns The value returned by `work`, once the transaction has committed.
    */
-  public transact<T>(
-    work: (uow: UnitOfWork<SqlitePersistenceRecords>) => Promise<T>,
-  ): Promise<T> {
+  public transact<T>(work: (uow: SqliteTransaction) => Promise<T>): Promise<T> {
     return this.queue.enqueue(() =>
       this.sleep === undefined
         ? withBusyRetry(() => this.runOnce(work), this.retry)
@@ -64,12 +54,12 @@ export class SqliteTransactionScope
    * enclosing {@link withBusyRetry}; any other callback failure aborts.
    */
   private async runOnce<T>(
-    work: (uow: UnitOfWork<SqlitePersistenceRecords>) => Promise<T>,
+    work: (uow: SqliteTransaction) => Promise<T>,
   ): Promise<T> {
     this.db.exec("BEGIN IMMEDIATE");
     let result: T;
     try {
-      result = await work(new SqliteUnitOfWork(this.db));
+      result = await work(new SqliteTransaction(this.db));
     } catch (error) {
       this.rollbackQuietly();
       throw new TransactionAbortedError(error);

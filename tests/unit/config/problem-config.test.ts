@@ -1,128 +1,223 @@
-/**
- * Unit tests for the `problem.yaml` schema v1 loader.
- *
- * These assert that documented defaults are applied for omitted optional
- * fields, that a fully specified document round-trips into a frozen config, and
- * that every rejection path — unknown field, wrong type, missing required
- * field, malformed slug, unsupported schema version, and out-of-range or
- * non-integer limits — fails closed with a {@link ProblemConfigError}.
- */
-
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
+  COMPARISON_POLICY_VERSION,
   DEFAULT_CASES_DIR,
-  DEFAULT_COMPARISON_POLICY,
-  DEFAULT_INPUT_CODEC,
-  DEFAULT_RUNTIME,
-  loadProblemConfig,
-  ProblemConfigError,
-} from "../../../src/infrastructure/config/index.js";
+  INPUT_CODEC_VERSION,
+  loadProblem,
+  loadRunContext,
+  OUTPUT_CODEC_VERSION,
+  ProblemError,
+  type LoadRunContextOptions,
+} from "../../../src/infrastructure/problem.js";
 
-/** A minimal valid document with only the required fields present. */
 const MINIMAL = [
   "schemaVersion: 1",
   "slug: two-sum",
   "title: Two Sum",
   "entrypoint: solution.py",
   "limits: {}",
+  "args: [int]",
+  "returns: int",
 ].join("\n");
 
-describe("loadProblemConfig", () => {
-  it("applies documented defaults for omitted optional fields", () => {
-    const config = loadProblemConfig(MINIMAL);
-    expect(config.runtime).toBe(DEFAULT_RUNTIME);
-    expect(config.inputCodec).toBe(DEFAULT_INPUT_CODEC);
-    expect(config.comparisonPolicy).toBe(DEFAULT_COMPARISON_POLICY);
-    expect(config.casesDir).toBe(DEFAULT_CASES_DIR);
-    expect(config.limits).toEqual({});
-    expect(Object.isFrozen(config)).toBe(true);
+describe("flat problem.yaml", () => {
+  it("loads problem-owned fields and fixed product defaults", () => {
+    const problem = loadProblem(MINIMAL);
+    expect(problem).toEqual({
+      schemaVersion: 1,
+      slug: "two-sum",
+      title: "Two Sum",
+      entrypoint: "solution.py",
+      casesDir: DEFAULT_CASES_DIR,
+      limits: {},
+      runtime: "python-uv",
+      inputCodec: INPUT_CODEC_VERSION,
+      outputCodec: OUTPUT_CODEC_VERSION,
+      comparisonPolicy: COMPARISON_POLICY_VERSION,
+      kind: "function",
+      args: [{ kind: "int" }],
+      returns: { kind: "int" },
+    });
+    expect(INPUT_CODEC_VERSION).toBe("tagged-jsonl-v1");
+    expect(OUTPUT_CODEC_VERSION).toBe("tagged-jsonl-v1");
+    expect(COMPARISON_POLICY_VERSION).toBe("exact-v1");
   });
 
-  it("parses a fully specified document including partial limits", () => {
-    const text = [
-      "schemaVersion: 1",
-      "slug: strict-example",
-      'title: "Strict Example"',
-      "entrypoint: solution.py",
-      "runtime: python-uv",
-      "inputCodec: tagged-jsonl-v1",
-      "outputCodec: tagged-jsonl-v1",
-      "comparisonPolicy: exact-v1",
-      "casesDir: cases",
-      "generator: generator.py",
-      "naive: naive.py",
-      "classProtocol: null",
-      "limits:",
-      "  memoryBytes: 33554432",
-      "  wallTimeMs: 500",
-    ].join("\n");
-    const config = loadProblemConfig(text);
-    expect(config.slug).toBe("strict-example");
-    expect(config.title).toBe("Strict Example");
-    expect(config.generator).toBe("generator.py");
-    expect(config.naive).toBe("naive.py");
-    expect(config.classProtocol).toBeNull();
-    expect(config.limits).toEqual({ memoryBytes: 33_554_432, wallTimeMs: 500 });
-  });
-
-  it("rejects an unknown top-level field", () => {
-    expect(() => loadProblemConfig(`${MINIMAL}\nmystery: 1`)).toThrow(
-      ProblemConfigError,
+  it("accepts optional problem assets and partial limits", () => {
+    const problem = loadProblem(
+      `${MINIMAL.replace("limits: {}\nargs", "limits:\n  memoryBytes: 33554432\n  wallTimeMs: 500\nargs")}\ngenerator: generator.py\nnaive: naive.py`,
     );
+    expect(problem).toMatchObject({
+      generator: "generator.py",
+      naive: "naive.py",
+      limits: { memoryBytes: 33_554_432, wallTimeMs: 500 },
+    });
   });
 
-  it("rejects a wrong-typed field", () => {
-    const text = [
-      "schemaVersion: 1",
-      "slug: two-sum",
-      "title: 12345",
-      "entrypoint: solution.py",
-      "limits: {}",
-    ].join("\n");
-    expect(() => loadProblemConfig(text)).toThrow(/title/u);
+  it.each([
+    ["unknown field", `${MINIMAL}\nruntime: python-uv`],
+    [
+      "missing title",
+      "schemaVersion: 1\nslug: two-sum\nentrypoint: solution.py",
+    ],
+    ["bad slug", MINIMAL.replace("two-sum", "Two_Sum")],
+    ["bad schema", MINIMAL.replace("schemaVersion: 1", "schemaVersion: 2")],
+    [
+      "bad limit",
+      `${MINIMAL.replace("limits: {}", "limits:")}\n  memoryBytes: 0`,
+    ],
+  ])("rejects %s", (_, text) => {
+    expect(() => loadProblem(text)).toThrow(ProblemError);
+  });
+});
+
+const INVOCATION_DIRECTORY = "/workspace/palestra";
+const DECLARED_PROBLEM_ROOT = `${INVOCATION_DIRECTORY}/problems/two-sum`;
+const CANONICAL_PROBLEM_ROOT = "/canonical/problems/two-sum";
+
+function loadOptions(
+  overrides: Partial<LoadRunContextOptions> = {},
+): LoadRunContextOptions {
+  return {
+    invocationDirectory: INVOCATION_DIRECTORY,
+    slug: "two-sum",
+    unsafeLocal: false,
+    environment: {},
+    readText: async () => MINIMAL,
+    realpath: async (path) =>
+      path === DECLARED_PROBLEM_ROOT ? CANONICAL_PROBLEM_ROOT : path,
+    resolveExecutable: async (name) => `/host/bin/${name}`,
+    isExecutable: async () => true,
+    ...overrides,
+  };
+}
+
+describe("run context host configuration", () => {
+  it("resolves and verifies uv and python3 from PATH, ignoring legacy executable environment variables", async () => {
+    const resolved: string[] = [];
+    const checked: string[] = [];
+    const context = await loadRunContext(
+      loadOptions({
+        environment: {
+          PALESTRA_STATE_DIR: "run-state",
+          PALESTRA_CGROUP_PARENT: "/sys/fs/cgroup/delegated/../palestra",
+          PALESTRA_UV_PATH: "/must-not-be-used/uv",
+          PALESTRA_PYTHON_PATH: "/must-not-be-used/python3",
+          PALESTRA_WALL_TIME_MS: "1",
+        },
+        resolveExecutable: async (name) => {
+          resolved.push(name);
+          return `/host/bin/${name}`;
+        },
+        isExecutable: async (path) => {
+          checked.push(path);
+          return true;
+        },
+      }),
+    );
+
+    expect(context).toMatchObject({
+      problemRoot: CANONICAL_PROBLEM_ROOT,
+      stateDirectory: `${INVOCATION_DIRECTORY}/run-state`,
+      cgroupParentPath: "/sys/fs/cgroup/palestra",
+      uvPath: "/host/bin/uv",
+      pythonPath: "/host/bin/python3",
+    });
+    expect(resolved).toEqual(["uv", "python3"]);
+    expect(checked).toEqual(["/host/bin/uv", "/host/bin/python3"]);
   });
 
-  it("rejects a missing required field", () => {
-    const text = ["schemaVersion: 1", "slug: two-sum", "limits: {}"].join("\n");
-    expect(() => loadProblemConfig(text)).toThrow(/entrypoint|title/u);
+  it("uses invocation-local state and the delegated cgroup defaults without host environment values", async () => {
+    const context = await loadRunContext(loadOptions());
+
+    expect(context.stateDirectory).toBe(`${INVOCATION_DIRECTORY}/.palestra`);
+    expect(context.cgroupParentPath).toBe("/sys/fs/cgroup/palestra");
   });
 
-  it("rejects a malformed slug", () => {
-    const text = MINIMAL.replace("slug: two-sum", "slug: Two_Sum");
-    expect(() => loadProblemConfig(text)).toThrow(/slug/u);
+  it("gives explicit host path overrides precedence over the environment", async () => {
+    const context = await loadRunContext(
+      loadOptions({
+        environment: {
+          PALESTRA_STATE_DIR: "environment-state",
+          PALESTRA_CGROUP_PARENT: "/sys/fs/cgroup/environment",
+        },
+        stateDirectory: "/explicit/state",
+        cgroupParentPath: "/sys/fs/cgroup/explicit/../palestra",
+      }),
+    );
+
+    expect(context.stateDirectory).toBe("/explicit/state");
+    expect(context.cgroupParentPath).toBe("/sys/fs/cgroup/palestra");
   });
 
-  it("rejects an unsupported schema version", () => {
-    const text = MINIMAL.replace("schemaVersion: 1", "schemaVersion: 2");
-    expect(() => loadProblemConfig(text)).toThrow(/schemaVersion/u);
-  });
+  it.each([
+    [
+      "an empty state directory",
+      { PALESTRA_STATE_DIR: "  " },
+      "PALESTRA_STATE_DIR must not be empty",
+    ],
+    [
+      "a state directory containing a NUL",
+      { PALESTRA_STATE_DIR: "bad\0path" },
+      "PALESTRA_STATE_DIR contains a NUL byte",
+    ],
+    [
+      "an empty cgroup parent",
+      { PALESTRA_CGROUP_PARENT: " " },
+      "PALESTRA_CGROUP_PARENT must not be empty",
+    ],
+    [
+      "a relative cgroup parent",
+      { PALESTRA_CGROUP_PARENT: "relative/cgroup" },
+      "PALESTRA_CGROUP_PARENT must be an absolute path",
+    ],
+    [
+      "a cgroup parent containing a NUL",
+      { PALESTRA_CGROUP_PARENT: "/sys/fs\0/cgroup" },
+      "PALESTRA_CGROUP_PARENT must be an absolute path",
+    ],
+  ])(
+    "rejects %s from the host environment",
+    async (_, environment, message) => {
+      await expect(
+        loadRunContext(loadOptions({ environment })),
+      ).rejects.toThrow(message);
+    },
+  );
 
-  it("rejects an unknown limit key", () => {
-    const text = `${MINIMAL.replace("limits: {}", "limits:")}\n  bogus: 1`;
-    expect(() => loadProblemConfig(text)).toThrow(/unknown limit/u);
-  });
+  it.each([
+    ["uv", undefined, "uv executable not found on PATH"],
+    ["python3", undefined, "python3 executable not found on PATH"],
+  ] as const)(
+    "reports when %s cannot be resolved",
+    async (missing, path, message) => {
+      const resolved: string[] = [];
+      await expect(
+        loadRunContext(
+          loadOptions({
+            resolveExecutable: async (name) => {
+              resolved.push(name);
+              return name === missing ? path : `/host/bin/${name}`;
+            },
+          }),
+        ),
+      ).rejects.toThrow(message);
+      expect(resolved).toEqual(missing === "uv" ? ["uv"] : ["uv", "python3"]);
+    },
+  );
 
-  it("rejects a zero or negative limit", () => {
-    const zero = `${MINIMAL.replace("limits: {}", "limits:")}\n  memoryBytes: 0`;
-    expect(() => loadProblemConfig(zero)).toThrow(/positive/u);
-    const negative = `${MINIMAL.replace("limits: {}", "limits:")}\n  memoryBytes: -1`;
-    expect(() => loadProblemConfig(negative)).toThrow(/positive/u);
-  });
-
-  it("rejects a limit integer outside the safe range", () => {
-    const huge = `${MINIMAL.replace("limits: {}", "limits:")}\n  memoryBytes: 99999999999999999999`;
-    expect(() => loadProblemConfig(huge)).toThrow(/safe range/u);
-  });
-
-  it("reports the offending field on the error", () => {
-    const text = `${MINIMAL.replace("limits: {}", "limits:")}\n  memoryBytes: 0`;
-    try {
-      loadProblemConfig(text);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(ProblemConfigError);
-      expect((err as ProblemConfigError).field).toBe("limits.memoryBytes");
-      expect((err as ProblemConfigError).exitCode).toBe(3);
-    }
-  });
+  it.each(["uv", "python3"] as const)(
+    "reports when resolved %s is not executable",
+    async (notExecutable) => {
+      await expect(
+        loadRunContext(
+          loadOptions({
+            isExecutable: async (path) => path !== `/host/bin/${notExecutable}`,
+          }),
+        ),
+      ).rejects.toThrow(
+        `${notExecutable} is not an executable file: /host/bin/${notExecutable}`,
+      );
+    },
+  );
 });

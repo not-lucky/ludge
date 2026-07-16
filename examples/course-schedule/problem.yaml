@@ -1,0 +1,8 @@
+schemaVersion: 1
+slug: course-schedule
+title: Course Schedule
+entrypoint: solution.py
+limits: {}
+casesDir: cases
+args: [int, "list[list[int]]"]
+returns: bool

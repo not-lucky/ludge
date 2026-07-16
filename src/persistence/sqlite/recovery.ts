@@ -21,7 +21,11 @@ import { IntegrityCheckError } from "./errors.js";
  * Terminal run lifecycle states. A run in any other state when the store opens
  * was interrupted and is a candidate for cancellation.
  */
-const TERMINAL_RUN_STATES: readonly string[] = ["completed", "failed", "canceled"];
+const TERMINAL_RUN_STATES: readonly string[] = [
+  "completed",
+  "failed",
+  "canceled",
+];
 
 /**
  * The complete set of terminal execution verdicts. An execution whose status is

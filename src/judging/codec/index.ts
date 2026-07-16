@@ -35,11 +35,7 @@ export type {
 } from "./envelope.js";
 
 // Limits.
-export {
-  MAX_DEPTH,
-  MAX_NODES,
-  MAX_PAYLOAD_BYTES,
-} from "./limits.js";
+export { MAX_DEPTH, MAX_NODES, MAX_PAYLOAD_BYTES } from "./limits.js";
 
 // Error types.
 export { CanonicalValidationError, CodecEncodeError } from "./errors.js";

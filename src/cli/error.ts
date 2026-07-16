@@ -22,7 +22,10 @@ export class CliError extends Error {
 }
 
 /** Create an error caused by malformed command-line input. */
-export function invalidInput(message: string, code = "invalid_input"): CliError {
+export function invalidInput(
+  message: string,
+  code = "invalid_input",
+): CliError {
   return new CliError("invalid_input", message, code);
 }
 
@@ -37,7 +40,11 @@ export function normalizeCliError(error: unknown): CliError {
   if (error instanceof Error) {
     return new CliError("internal_error", error.message, "internal_error");
   }
-  return new CliError("internal_error", "an unexpected CLI failure occurred", "internal_error");
+  return new CliError(
+    "internal_error",
+    "an unexpected CLI failure occurred",
+    "internal_error",
+  );
 }
 
 /** Bound text while preserving a deterministic indication of truncation. */

@@ -12,7 +12,20 @@
  */
 
 import type { PersistableRun, RunId, RunQuery } from "../../../domain/index.js";
-import type { RunRepository } from "../../ports/index.js";
+
+interface BenchmarkRunDetails {
+  readonly problemId: string;
+  readonly command: string;
+  readonly environmentId: string;
+  readonly methodologyVersion: string;
+  readonly warmups: number;
+  readonly sampleCount: number;
+  readonly orderSeed: string;
+  readonly planSha256: string;
+  readonly comparable: boolean;
+  readonly comparabilityReason: string | null;
+  readonly finishedAt: string;
+}
 import type { SqliteConnection } from "../connection.js";
 import {
   buildRunWhere,
@@ -21,9 +34,10 @@ import {
   runInsert,
   runToRow,
 } from "../mappers.js";
+import { insertObject } from "../row-io.js";
 
 /** A {@link RunRepository} backed by a single SQLite connection. */
-export class SqliteRunRepository implements RunRepository {
+export class SqliteRunRepository {
   /**
    * @param db - The bound connection (writer inside a transaction, else reader).
    */
@@ -40,6 +54,37 @@ export class SqliteRunRepository implements RunRepository {
     return Promise.resolve();
   }
 
+  /** Persist a benchmark Memento with its immutable plan/environment facts. */
+  public commitBenchmark(
+    run: PersistableRun,
+    details: BenchmarkRunDetails,
+  ): Promise<void> {
+    if (
+      details.comparable
+        ? details.comparabilityReason !== null
+        : details.comparabilityReason === null
+    ) {
+      throw new RangeError(
+        "benchmark comparability reason must match the comparability flag",
+      );
+    }
+    insertObject(this.db, "run", {
+      ...runToRow(run),
+      problem_id: details.problemId,
+      command: details.command,
+      environment_id: details.environmentId,
+      methodology_version: details.methodologyVersion,
+      benchmark_warmups: details.warmups,
+      benchmark_sample_count: details.sampleCount,
+      benchmark_order_seed: details.orderSeed,
+      benchmark_plan_sha256: details.planSha256,
+      benchmark_comparability: details.comparable ? 1 : 0,
+      benchmark_comparability_reason: details.comparabilityReason,
+      finished_at: details.finishedAt,
+    });
+    return Promise.resolve();
+  }
+
   /**
    * Look up a single run by identity.
    *
@@ -50,7 +95,9 @@ export class SqliteRunRepository implements RunRepository {
     const raw = this.db
       .prepare("SELECT * FROM run WHERE run_id = :run_id")
       .get({ run_id: runId });
-    return Promise.resolve(raw === undefined ? null : rowToRun(readRunRow(raw)));
+    return Promise.resolve(
+      raw === undefined ? null : rowToRun(readRunRow(raw)),
+    );
   }
 
   /**

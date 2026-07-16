@@ -9,10 +9,9 @@
  * This is an adapter module; it imports the driver only as a type.
  */
 
-import type { MetricsRepository } from "../../ports/index.js";
 import type { SqliteConnection } from "../connection.js";
 import { readMetricRow } from "../row-io.js";
-import type { DailyMetricRow, SqlitePersistenceRecords } from "../rows.js";
+import type { DailyMetricRow } from "../rows.js";
 
 /** Upsert that overwrites the counters and `solved_at` on the composite PK. */
 const UPSERT_DAILY_SQL = [
@@ -29,9 +28,7 @@ const UPSERT_DAILY_SQL = [
 ].join("\n");
 
 /** A {@link MetricsRepository} backed by a single SQLite connection. */
-export class SqliteMetricsRepository
-  implements MetricsRepository<SqlitePersistenceRecords>
-{
+export class SqliteMetricsRepository {
   /**
    * @param db - The bound connection (writer inside a transaction, else reader).
    */

@@ -17,13 +17,6 @@
 
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type {
-  BenchmarkRepository,
-  MetricsRepository,
-  ProblemRepository,
-  RunRepository,
-  TransactionScope,
-} from "../ports/index.js";
 import type { SqliteConnection } from "./connection.js";
 import { openReader, openWriter } from "./connection.js";
 import { configureConnection } from "./durability.js";
@@ -38,7 +31,7 @@ import { SqliteBenchmarkRepository } from "./repositories/benchmark-repository.j
 import { SqliteMetricsRepository } from "./repositories/metrics-repository.js";
 import { SqliteProblemRepository } from "./repositories/problem-repository.js";
 import { SqliteRunRepository } from "./repositories/run-repository.js";
-import type { SqlitePersistenceRecords } from "./rows.js";
+import type { SqliteTransaction } from "./unit-of-work.js";
 import { migrate } from "./schema.js";
 import { SqliteTransactionScope } from "./transaction-scope.js";
 import type { BusyRetryOptions, Sleeper } from "./writer-queue.js";
@@ -67,18 +60,18 @@ export interface SqliteStoreConfig {
  */
 export class SqliteStore {
   /** The atomic write seam; every durable mutation flows through it. */
-  public readonly transaction: TransactionScope<SqlitePersistenceRecords>;
+  public readonly transaction: SqliteTransactionScope;
 
   /** Read-only runs accessor (backed by the reader connection). */
-  public readonly runs: RunRepository;
+  public readonly runs: SqliteRunRepository;
   /** Read-only artifact lookup used by replay. */
   public readonly artifactLookup: SqliteArtifactReaderRepository;
   /** Read-only problems accessor. */
-  public readonly problems: ProblemRepository<SqlitePersistenceRecords>;
+  public readonly problems: SqliteProblemRepository;
   /** Read-only benchmarks accessor. */
-  public readonly benchmarks: BenchmarkRepository<SqlitePersistenceRecords>;
+  public readonly benchmarks: SqliteBenchmarkRepository;
   /** Read-only metrics accessor. */
-  public readonly metrics: MetricsRepository<SqlitePersistenceRecords>;
+  public readonly metrics: SqliteMetricsRepository;
 
   /**
    * @param writer - The configured read-write connection (single writer).
@@ -87,7 +80,7 @@ export class SqliteStore {
   private constructor(
     private readonly writer: SqliteConnection,
     private readonly reader: SqliteConnection,
-    scope: TransactionScope<SqlitePersistenceRecords>,
+    scope: SqliteTransactionScope,
   ) {
     this.transaction = scope;
     this.runs = new SqliteRunRepository(reader);
@@ -102,6 +95,12 @@ export class SqliteStore {
    *
    * @param sink - Receives each JSON Lines record.
    */
+  public transact<T>(
+    work: (transaction: SqliteTransaction) => Promise<T>,
+  ): Promise<T> {
+    return this.transaction.transact(work);
+  }
+
   public export(sink: JsonlSink): void {
     exportJsonl(this.reader, sink);
   }
@@ -155,7 +154,8 @@ export class SqliteStore {
 export function openSqliteStore(config: SqliteStoreConfig): SqliteStore {
   // First use has no database directory yet. Create only the direct parent
   // before probing it; the durability probe still rejects unprovable/network FS.
-  if (config.path !== ":memory:") mkdirSync(dirname(config.path), { recursive: true });
+  if (config.path !== ":memory:")
+    mkdirSync(dirname(config.path), { recursive: true });
   assertLocalFilesystem(config.path, config.filesystemProbe);
 
   const writer = openWriter(config.path);

@@ -109,7 +109,9 @@ def _invoke(entry: Any, input_value: Any) -> Any:
 def _run_class_trace(instance_class: Any, trace: ClassTrace) -> list[Any]:
     """Construct the class once and apply each operation, collecting returns."""
     instance = instance_class(*trace.constructor)
-    returns: list[Any] = []
+    # LeetCode's operation/argument/output arrays are index-aligned: the
+    # constructor occupies index zero and therefore contributes its `null`.
+    returns: list[Any] = [None]
     for operation in trace.operations:
         method = getattr(instance, operation.method, None)
         if method is None:

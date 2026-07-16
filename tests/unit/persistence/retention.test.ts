@@ -26,7 +26,11 @@ describe("applyRetention", () => {
     raw = createRawDb();
     seedGraphOn(raw.db);
     insertObject(raw.db, "execution", makeExecution());
-    insertObject(raw.db, "benchmark_sample", makeSample({ raw_json: '{"s":1}' }));
+    insertObject(
+      raw.db,
+      "benchmark_sample",
+      makeSample({ raw_json: '{"s":1}' }),
+    );
   });
 
   afterEach(() => {
@@ -76,8 +80,12 @@ describe("applyRetention", () => {
 
     applyRetention(raw.db, new Date("2026-09-01T00:00:00.000Z"));
 
-    const aggregates = raw.db.prepare("SELECT COUNT(*) AS n FROM benchmark_aggregate").get();
-    const artifacts = raw.db.prepare("SELECT COUNT(*) AS n FROM artifact").get();
+    const aggregates = raw.db
+      .prepare("SELECT COUNT(*) AS n FROM benchmark_aggregate")
+      .get();
+    const artifacts = raw.db
+      .prepare("SELECT COUNT(*) AS n FROM artifact")
+      .get();
     expect(Number(aggregates?.["n"])).toBe(1);
     expect(Number(artifacts?.["n"])).toBe(1);
   });

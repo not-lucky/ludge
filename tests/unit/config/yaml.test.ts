@@ -9,8 +9,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseYaml } from "../../../src/infrastructure/config/index.js";
-import type { YamlNode } from "../../../src/infrastructure/config/index.js";
+import {
+  parseYaml,
+  type YamlNode,
+} from "../../../src/infrastructure/problem.js";
 
 /** Assert a parse succeeded and return the root map's entries. */
 function entriesOf(text: string): ReadonlyMap<string, YamlNode> {
@@ -60,9 +62,12 @@ describe("parseYaml", () => {
   });
 
   it("parses a nested block mapping", () => {
-    const text = ["limits:", "  memoryBytes: 1024", "  wallTimeMs: 2000", "after: x"].join(
-      "\n",
-    );
+    const text = [
+      "limits:",
+      "  memoryBytes: 1024",
+      "  wallTimeMs: 2000",
+      "after: x",
+    ].join("\n");
     const entries = entriesOf(text);
     const limits = entries.get("limits");
     expect(limits?.kind).toBe("map");

@@ -1,7 +1,19 @@
 /** Execution profiling records built from bounded sandbox observations. */
 
-import type { ExecutionStatus, RawProcessResult, TerminationCause } from "../domain/index.js";
-import type { Clock, Profiler, ProfileScope } from "../execution/ports/index.js";
+import type {
+  ExecutionStatus,
+  RawProcessResult,
+  TerminationCause,
+} from "../domain/index.js";
+import type { Clock } from "../execution/clock.js";
+
+interface ProfileScope<T> {
+  finish(raw: RawProcessResult): T;
+}
+
+interface Profiler<T> {
+  begin(): ProfileScope<T>;
+}
 
 /** Version for persisted and evented execution profiling records. */
 export const EXECUTION_PROFILE_SCHEMA_VERSION = 1 as const;
@@ -81,14 +93,12 @@ export interface ExecutionProfileFacts {
 }
 
 /** Create a concrete execution profiler coherent with a backend identifier. */
-export function createExecutionProfiler<Tag extends string>(
-  backendId: Tag,
+export function createExecutionProfiler(
   clock: Clock,
   outcome: ExecutionProfileOutcome = { status: null, limitCause: null },
   facts: ExecutionProfileFacts = {},
-): Profiler<ExecutionProfile, Tag> {
+): Profiler<ExecutionProfile> {
   return {
-    backendId,
     begin(): ProfileScope<ExecutionProfile> {
       const startedNs = clock.monotonicNs();
       return {

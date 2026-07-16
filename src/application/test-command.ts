@@ -1,15 +1,7 @@
-/**
- * Fixed-case `test` command application facade.
- *
- * The facade coordinates configuration, static case streaming, the isolated
- * execution bundle, verdict normalization, and post-verdict persistence. It
- * depends on injected ports/factories rather than concrete CLI adapters; the
- * CLI composition root selects Node, Linux, Python, and SQLite implementations.
- */
-
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
+import { availableParallelism } from "node:os";
 import {
   type CaseId,
   type ComparisonPolicy,
@@ -17,48 +9,58 @@ import {
   type ExecutionStatus,
   initialGeneration,
   mostSevere,
-  RunLifecycle,
+  type Generation,
   type RawProcessResult,
   type RunId,
   type TerminationCause,
   toCaseId,
   toRunId,
 } from "../domain/index.js";
-import type { CancellationToken, Clock, RuntimeBundle } from "../execution/ports/index.js";
+import type { CancellationToken } from "../execution/cancellation.js";
+import type { Clock } from "../execution/clock.js";
+import type { Runner } from "../execution/runner.js";
+import type { RunContext } from "../infrastructure/problem.js";
 import {
-  assertConfigurationValid,
-  loadProblemConfig,
-  parseEnvOverrides,
-  resolveEffectiveConfig,
-  type ConfigProbes,
-  type EffectiveConfig,
-  type EnvironmentRecord,
-  type PathContext,
-} from "../infrastructure/config/index.js";
+  prepareRunContext,
+  type PreparedRunContext,
+  type PrepareRunOptions,
+} from "./run-context.js";
 import {
   decodeResponseLine,
   encodeRequestLine,
 } from "../judging/codec/index.js";
 import { createOutputComparator } from "../judging/comparator/index.js";
 import { canonicalStringOf } from "../judging/codec/encode.js";
-import type { CanonicalValue } from "../judging/value/index.js";
-import type { PersistenceRecords, TransactionScope } from "../persistence/ports/index.js";
-import { FixedCaseError, streamFixedCases, type FixedCase } from "./fixed-cases.js";
+import type { CanonicalValue } from "../judging/value/model.js";
+import type { SqliteTransactionScope } from "../persistence/sqlite/transaction-scope.js";
+import type {
+  ArtifactRow,
+  CaseRow,
+  ExecutionRow,
+  ImplementationRow,
+  ProblemRow,
+} from "../persistence/sqlite/rows.js";
+import {
+  FixedCaseError,
+  streamFixedCases,
+  type FixedCase,
+} from "./fixed-cases.js";
 
-/** Version of mismatch artifact documents produced by this command. */
 export const FIXED_MISMATCH_ARTIFACT_VERSION = 1 as const;
 
-/** JSON-safe summary returned through the CLI result boundary. */
 export interface TestCommandResult {
   readonly runId: string;
   readonly state: "completed" | "failed" | "canceled";
+  /** Complete source-ordered case data; human mode deliberately does not dump it. */
   readonly cases: readonly TestCaseSummary[];
   readonly caseCount: number;
   readonly passedCaseCount: number;
+  readonly statusCounts: Readonly<Record<string, number>>;
+  /** First non-passing logical case in source order, if the full run found one. */
+  readonly firstFailure: (TestCaseSummary & TestFailureDetails) | null;
   readonly artifactId: string | null;
 }
 
-/** JSON-safe per-case summary; raw output remains only in persistence/artifacts. */
 export interface TestCaseSummary {
   readonly caseId: string;
   readonly path: string;
@@ -66,86 +68,108 @@ export interface TestCaseSummary {
   readonly durationMs: number | null;
 }
 
-/** Parsed CLI data consumed without coupling this use case to the CLI layer. */
+/** Human-readable, JSON-safe details for the selected deterministic failure. */
+export interface TestFailureDetails {
+  readonly input: string;
+  readonly expected: string;
+  readonly actual: string | null;
+  readonly error: string | null;
+}
+
 export interface TestInvocation {
   readonly slug: string;
   readonly solution?: string;
   readonly case?: string;
+  /** Maximum independent fixed-case executions; omitted uses a safe default. */
+  readonly jobs?: number;
   readonly unsafeLocal: boolean;
+  readonly generation?: Generation;
 }
 
-/** A bounded application diagnostic translated at the CLI boundary. */
-export interface TestDiagnostic { readonly code: string; readonly message: string; }
+export interface TestDiagnostic {
+  readonly code: string;
+  readonly message: string;
+}
 
-/** Application outcome before the CLI maps it to its output envelope. */
 export interface TestApplicationOutcome {
   readonly status: ExecutionStatus;
   readonly result: TestCommandResult | null;
   readonly diagnostics: readonly TestDiagnostic[];
 }
 
-/** Persistence rows the test use case writes through a transaction-only port. */
-export interface TestPersistenceRecords extends PersistenceRecords {
-  readonly problem: TestProblemRow;
-  readonly implementation: TestImplementationRow;
-  readonly case: TestCaseRow;
-  readonly execution: TestExecutionRow;
-  readonly artifact: TestArtifactRow;
-  readonly replay: unknown;
+export interface DeferredTestExecution {
+  readonly outcome: TestApplicationOutcome;
+  commit(): Promise<TestApplicationOutcome>;
 }
-export interface TestProblemRow { readonly problem_id: string; readonly slug: string; readonly schema_version: number; readonly title: string; readonly created_at: string; readonly updated_at: string; }
-export interface TestImplementationRow { readonly implementation_id: string; readonly problem_id: string; readonly path: string; readonly role: string; readonly content_sha256: string; readonly runtime: string; readonly created_at: string; }
-export interface TestCaseRow { readonly case_id: string; readonly run_id: string; readonly ordinal: number; readonly input_sha256: string; readonly input_bytes: bigint; readonly status: string; }
-export interface TestExecutionRow { readonly execution_id: string; readonly case_id: string; readonly implementation_id: string; readonly status: string; readonly exit_code: number | null; readonly signal: string | null; readonly wall_ns: bigint | null; readonly cpu_ns: bigint | null; readonly peak_memory_bytes: bigint | null; readonly stdout_bytes: bigint | null; readonly stderr_bytes: bigint | null; readonly stdout_truncated: 0 | 1 | null; readonly stderr_truncated: 0 | 1 | null; readonly limit_cause: string | null; readonly raw_json: string | null; }
-export interface TestArtifactRow { readonly artifact_id: string; readonly run_id: string; readonly kind: string; readonly path: string; readonly sha256: string; readonly size_bytes: bigint; readonly created_at: string; }
 
-/** Dependencies controlled by the composition root or unit-test fakes. */
 export interface TestCommandDependencies {
   readonly invocationDirectory: string;
-  readonly environment: EnvironmentRecord;
   readonly cancellation: CancellationToken;
   readonly clock: Clock;
-  readonly probes: ConfigProbes;
-  readonly supportedRuntimes: ReadonlySet<string>;
-  readonly requiredControls: readonly ("cgroup" | "rlimits" | "network" | "filesystem" | "no-new-privileges" | "drop-capabilities" | "namespaces" | "seccomp")[];
-  readonly createBundle: (effective: EffectiveConfig) => RuntimeBundle;
-  readonly transaction: TransactionScope<TestPersistenceRecords>;
+  readonly prepareRun?: (
+    options: PrepareRunOptions,
+  ) => Promise<PreparedRunContext>;
+  readonly transaction: Pick<SqliteTransactionScope, "transact">;
   readonly readText: (path: string) => Promise<string>;
   readonly createId?: () => string;
   readonly sha256?: (bytes: Uint8Array) => string;
-  readonly writeMismatchArtifact?: (request: MismatchArtifactWrite) => Promise<ArtifactFile>;
-  /** Pure termination classifier selected by the composition root. */
-  readonly classifyTermination: (raw: RawProcessResult, limits: EffectiveConfig["limits"]) => TerminationCause;
+  readonly writeMismatchArtifact?: (
+    request: MismatchArtifactWrite,
+  ) => Promise<ArtifactFile>;
+  /** Injectable bounded automatic worker count, primarily for deterministic tests. */
+  readonly defaultJobs?: () => number;
+  readonly classifyTermination: (
+    raw: RawProcessResult,
+    limits: RunContext["limits"],
+  ) => TerminationCause;
 }
 
-/** Facts needed to write one versioned mismatch artifact. */
 export interface MismatchArtifactWrite {
   readonly artifactId: string;
   readonly invocationDirectory: string;
   readonly runId: string;
   readonly case: FixedCase;
   readonly actual: CanonicalValue | null;
-  readonly mismatch: Readonly<{ path: string; reason: string; expected: string; actual: string }> | null;
+  readonly mismatch: Readonly<{
+    path: string;
+    reason: string;
+    expected: string;
+    actual: string;
+  }> | null;
   readonly raw: RawExecutionFact;
   readonly createdAt: string;
 }
 
-/** Artifact file metadata used by the persistence row. */
 export interface ArtifactFile {
   readonly path: string;
   readonly sha256: string;
   readonly sizeBytes: bigint;
 }
 
-/** JSON-safe bounded raw sandbox facts retained with an execution/artifact. */
 interface RawExecutionFact {
   readonly schemaVersion: 1;
   readonly termination: string;
   readonly exitCode: number | null;
   readonly signal: string | null;
-  readonly stdout: { readonly totalBytes: number; readonly truncated: boolean; readonly sha256: string; readonly dataBase64Url: string };
-  readonly stderr: { readonly totalBytes: number; readonly truncated: boolean; readonly sha256: string; readonly dataBase64Url: string };
-  readonly resources: { readonly wallTimeMs: number; readonly cpuTimeMs: number; readonly memoryPeakBytes: number; readonly oomKills: number; readonly peakProcessCount: number };
+  readonly stdout: {
+    readonly totalBytes: number;
+    readonly truncated: boolean;
+    readonly sha256: string;
+    readonly dataBase64Url: string;
+  };
+  readonly stderr: {
+    readonly totalBytes: number;
+    readonly truncated: boolean;
+    readonly sha256: string;
+    readonly dataBase64Url: string;
+  };
+  readonly resources: {
+    readonly wallTimeMs: number;
+    readonly cpuTimeMs: number;
+    readonly memoryPeakBytes: number;
+    readonly oomKills: number;
+    readonly peakProcessCount: number;
+  };
   readonly cleanupDiagnostics: readonly string[];
 }
 
@@ -157,166 +181,287 @@ interface CompletedCase {
   readonly inputBytes: Uint8Array;
   readonly outputBytes: Uint8Array | null;
   readonly actual: CanonicalValue | null;
-  readonly mismatch: Readonly<{ path: string; reason: string; expected: string; actual: string }> | null;
+  readonly mismatch: Readonly<{
+    path: string;
+    reason: string;
+    expected: string;
+    actual: string;
+  }> | null;
   readonly raw: RawExecutionFact;
   readonly durationMs: number | null;
+  readonly exceptionMessage?: string;
 }
 
-/**
- * Run fixed cases for one parsed `test` invocation.
- *
- * Configuration/case-data faults return `invalid_input`; target outcomes are
- * derived strictly from raw sandbox/protocol/comparison facts. Persistence is
- * intentionally delayed until verdict formation and cannot rewrite that status.
- */
 export async function executeTestCommand(
   command: TestInvocation,
   dependencies: TestCommandDependencies,
 ): Promise<TestApplicationOutcome> {
+  return (await executeTestCommandDeferred(command, dependencies)).commit();
+}
+
+export async function executeTestCommandDeferred(
+  command: TestInvocation,
+  dependencies: TestCommandDependencies,
+): Promise<DeferredTestExecution> {
   const diagnostics: TestDiagnostic[] = [];
   try {
     const prepared = await prepare(command, dependencies);
     const runId = toRunId(identifier(dependencies));
     const startedAt = dependencies.clock.wallTimeUtc();
     const startedNs = dependencies.clock.monotonicNs();
-    let lifecycle = RunLifecycle.queued(initialGeneration()).start().run();
-    const completed: CompletedCase[] = [];
-
+    const generation = command.generation ?? initialGeneration();
+    const fixedCases: FixedCase[] = [];
     for await (const fixedCase of streamFixedCases(prepared.selection)) {
-      if (dependencies.cancellation.isCancellationRequested) {
-        lifecycle = lifecycle.requestCancel();
-        break;
-      }
-      const result = await executeOne(
-        prepared.effective,
-        prepared.bundle,
-        prepared.problemRoot,
-        fixedCase,
-        runId,
-        identifier(dependencies),
-        dependencies,
-      );
-      if (result === null) {
-        lifecycle = lifecycle.requestCancel();
-        break;
-      }
-      completed.push(result);
+      if (dependencies.cancellation.isCancellationRequested) break;
+      fixedCases.push(fixedCase);
     }
+    const completed = await executeFixedCases(
+      prepared,
+      fixedCases,
+      runId,
+      generation,
+      command.jobs ?? automaticJobs(dependencies),
+      dependencies,
+    );
 
     if (dependencies.cancellation.isCancellationRequested) {
-      lifecycle = lifecycle.requestCancel();
       const state = "canceled" as const;
-      return Object.freeze({ status: "canceled", result: summarize(runId, state, completed, null), diagnostics: Object.freeze(diagnostics) });
+      return deferred(
+        Object.freeze({
+          status: "canceled",
+          result: summarize(runId, state, completed, null),
+          diagnostics: Object.freeze(diagnostics),
+        }),
+      );
     }
 
     const status = aggregateStatus(completed);
-    lifecycle = lifecycle.settleFromResult(
-      initialGeneration(),
-      status === "passed" || status === "wrong_answer" ? "completed" : "failed",
+    appendSandboxDiagnostics(completed, diagnostics);
+    const state =
+      status === "passed" || status === "wrong_answer" ? "completed" : "failed";
+    const durationMs = durationSince(
+      startedNs,
+      dependencies.clock.monotonicNs(),
     );
-    const durationMs = durationSince(startedNs, dependencies.clock.monotonicNs());
-    const mismatch = completed.find((item) => item.status === "wrong_answer");
-    let artifact: { id: string; file: ArtifactFile } | null = null;
-    if (mismatch !== undefined) {
-      try {
-        const artifactId = identifier(dependencies);
-        artifact = {
-          id: artifactId,
-          file: await (dependencies.writeMismatchArtifact ?? writeMismatchArtifact)({
-            artifactId,
-            invocationDirectory: dependencies.invocationDirectory,
-            runId,
-            case: mismatch.case,
-            actual: mismatch.actual,
-            mismatch: mismatch.mismatch,
-            raw: mismatch.raw,
-            createdAt: dependencies.clock.wallTimeUtc(),
-          }),
-        };
-      } catch (error) {
-        diagnostics.push(diagnostic("artifact_write_failed", error));
-      }
-    }
-
-    try {
-      await persist(
-        prepared,
-        runId,
-        lifecycle.state as "completed" | "failed",
-        status,
-        startedAt,
-        durationMs,
-        completed,
-        artifact,
-        dependencies,
-      );
-    } catch (error) {
-      diagnostics.push(diagnostic("persistence_failed", error));
-    }
-    return Object.freeze({ status, result: summarize(runId, lifecycle.state as "completed" | "failed", completed, artifact?.id ?? null), diagnostics: Object.freeze(diagnostics) });
+    const firstFailure = completed.find((item) => item.status !== "passed");
+    const uncommitted = Object.freeze({
+      status,
+      result: summarize(runId, state, completed, null),
+      diagnostics: Object.freeze([...diagnostics]),
+    });
+    let committed: Promise<TestApplicationOutcome> | undefined;
+    return Object.freeze({
+      outcome: uncommitted,
+      commit: (): Promise<TestApplicationOutcome> => {
+        committed ??= commitDeferredTest({
+          prepared,
+          runId,
+          generation,
+          state,
+          status,
+          startedAt,
+          durationMs,
+          completed,
+          firstFailure,
+          dependencies,
+          diagnostics,
+        });
+        return committed;
+      },
+    });
   } catch (error) {
-    // All errors before a target verdict are configuration/problem/case data
-    // faults by this command's contract. Post-verdict artifact and SQL errors
-    // are caught at their own seams above and cannot reach this conversion.
-    return Object.freeze({ status: "invalid_input", result: null, diagnostics: Object.freeze([diagnostic("test_configuration_error", error)]) });
+    return deferred(
+      Object.freeze({
+        status: "invalid_input",
+        result: null,
+        diagnostics: Object.freeze([
+          diagnostic("test_configuration_error", error),
+        ]),
+      }),
+    );
   }
 }
 
-async function prepare(command: TestInvocation, dependencies: TestCommandDependencies): Promise<{
-  readonly effective: EffectiveConfig;
-  readonly bundle: RuntimeBundle;
-  readonly problemRoot: string;
-  readonly selection: { readonly problemRoot: string; readonly casesDir: string; readonly invocationDirectory: string; readonly caseOverride?: string; readonly maxBytes: number };
-}> {
-  const declaredProblemRoot = resolve(dependencies.invocationDirectory, "problems", command.slug);
-  const problemRoot = await realpath(declaredProblemRoot);
-  const yamlPath = resolve(problemRoot, "problem.yaml");
-  const problem = loadProblemConfig(await dependencies.readText(yamlPath));
-  if (problem.slug !== command.slug) {
-    throw new FixedCaseError(`problem.yaml slug does not match requested slug: ${problem.slug}`);
+interface DeferredCommitInput {
+  readonly prepared: Awaited<ReturnType<typeof prepare>>;
+  readonly runId: RunId;
+  readonly generation: Generation;
+  readonly state: "completed" | "failed";
+  readonly status: TerminationCause;
+  readonly startedAt: string;
+  readonly durationMs: number;
+  readonly completed: readonly CompletedCase[];
+  readonly firstFailure: CompletedCase | undefined;
+  readonly dependencies: TestCommandDependencies;
+  readonly diagnostics: TestDiagnostic[];
+}
+
+function deferred(outcome: TestApplicationOutcome): DeferredTestExecution {
+  return Object.freeze({ outcome, commit: async () => outcome });
+}
+
+async function commitDeferredTest(
+  input: DeferredCommitInput,
+): Promise<TestApplicationOutcome> {
+  const {
+    prepared,
+    runId,
+    generation,
+    state,
+    status,
+    startedAt,
+    durationMs,
+    completed,
+    firstFailure,
+    dependencies,
+  } = input;
+  const diagnostics = [...input.diagnostics];
+  let artifact: { id: string; file: ArtifactFile } | null = null;
+  if (firstFailure !== undefined) {
+    try {
+      const artifactId = identifier(dependencies);
+      artifact = {
+        id: artifactId,
+        file: await (
+          dependencies.writeMismatchArtifact ?? writeMismatchArtifact
+        )({
+          artifactId,
+          invocationDirectory: dependencies.invocationDirectory,
+          runId,
+          case: firstFailure.case,
+          actual: firstFailure.actual,
+          mismatch: firstFailure.mismatch,
+          raw: firstFailure.raw,
+          createdAt: dependencies.clock.wallTimeUtc(),
+        }),
+      };
+    } catch (error) {
+      diagnostics.push(diagnostic("artifact_write_failed", error));
+    }
   }
-  const context: PathContext = { invocationDir: dependencies.invocationDirectory, problemRoot };
-  const effective = resolveEffectiveConfig({
-    problem,
-    env: parseEnvOverrides(dependencies.environment),
-    cli: {
-      unsafeLocal: command.unsafeLocal,
-      ...(command.solution === undefined ? {} : { solution: command.solution }),
-    },
-    context,
+  try {
+    await persist(
+      prepared,
+      runId,
+      generation,
+      state,
+      status,
+      startedAt,
+      durationMs,
+      completed,
+      artifact,
+      dependencies,
+    );
+  } catch (error) {
+    diagnostics.push(diagnostic("persistence_failed", error));
+  }
+  return Object.freeze({
+    status,
+    result: summarize(runId, state, completed, artifact?.id ?? null),
+    diagnostics: Object.freeze(diagnostics),
   });
-  await assertConfigurationValid({
-    effective,
-    probes: dependencies.probes,
-    supportedRuntimes: dependencies.supportedRuntimes,
-    requiredControls: dependencies.requiredControls,
-  });
-  const entrypoint = await confinedRealPath(effective.assets.entrypoint, problemRoot, "solution path");
-  const resolved = Object.freeze({
-    ...effective,
-    assets: Object.freeze({ ...effective.assets, entrypoint }),
+}
+
+async function prepare(
+  command: TestInvocation,
+  dependencies: TestCommandDependencies,
+): Promise<{
+  readonly context: RunContext;
+  readonly runner: Runner;
+  readonly problemRoot: string;
+  readonly selection: {
+    readonly problemRoot: string;
+    readonly casesDir: string;
+    readonly invocationDirectory: string;
+    readonly problem: RunContext["problem"];
+    readonly caseOverride?: string;
+    readonly maxBytes: number;
+  };
+}> {
+  const prepared = await (dependencies.prepareRun ?? prepareRunContext)({
+    invocationDirectory: dependencies.invocationDirectory,
+    slug: command.slug,
+    unsafeLocal: command.unsafeLocal,
+    ...(command.solution === undefined ? {} : { solution: command.solution }),
   });
   return {
-    effective: resolved,
-    bundle: dependencies.createBundle(resolved),
-    problemRoot,
+    ...prepared,
+    problemRoot: prepared.context.problemRoot,
     selection: {
-      problemRoot,
-      casesDir: effective.assets.casesDir,
+      problemRoot: prepared.context.problemRoot,
+      casesDir: prepared.context.assets.casesDir,
       invocationDirectory: dependencies.invocationDirectory,
+      problem: prepared.context.problem,
       ...(command.case === undefined ? {} : { caseOverride: command.case }),
-      maxBytes: effective.limits.inputBytes,
+      maxBytes: prepared.context.limits.inputBytes,
     },
   };
 }
 
+/**
+ * Execute all selected cases without failure short-circuiting. Workers claim
+ * source ordinals synchronously, so a later-finishing case can never alter
+ * result, persistence, artifact, or human-failure ordering. Cancellation
+ * prevents new claims and then waits for already-started runner calls to drain.
+ */
+async function executeFixedCases(
+  prepared: Awaited<ReturnType<typeof prepare>>,
+  fixedCases: readonly FixedCase[],
+  runId: RunId,
+  generation: Generation,
+  jobs: number,
+  dependencies: TestCommandDependencies,
+): Promise<CompletedCase[]> {
+  if (!Number.isSafeInteger(jobs) || jobs <= 0) {
+    throw new FixedCaseError("--jobs must be a positive safe integer");
+  }
+  const workerCount = Math.min(jobs, fixedCases.length);
+  if (workerCount === 0) return [];
+  const completed: Array<CompletedCase | undefined> = Array(fixedCases.length);
+  let nextOrdinal = 0;
+  const worker = async (): Promise<void> => {
+    while (!dependencies.cancellation.isCancellationRequested) {
+      const ordinal = nextOrdinal;
+      if (ordinal >= fixedCases.length) return;
+      nextOrdinal += 1;
+      const result = await executeOne(
+        prepared.context,
+        prepared.runner,
+        prepared.problemRoot,
+        fixedCases[ordinal]!,
+        runId,
+        identifier(dependencies),
+        generation,
+        dependencies,
+      );
+      if (result !== null) completed[ordinal] = result;
+      if (
+        result === null ||
+        dependencies.cancellation.isCancellationRequested
+      ) {
+        return;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return completed.filter((item): item is CompletedCase => item !== undefined);
+}
+
+/** Conservative automatic cap avoids opening an unbounded number of sandboxes. */
+function automaticJobs(dependencies: TestCommandDependencies): number {
+  const jobs = dependencies.defaultJobs?.() ?? availableParallelism();
+  if (!Number.isSafeInteger(jobs) || jobs <= 0) return 1;
+  return Math.min(jobs, 16);
+}
+
 async function executeOne(
-  effective: EffectiveConfig,
-  bundle: RuntimeBundle,
+  context: RunContext,
+  runner: Runner,
   problemRoot: string,
   fixedCase: FixedCase,
   runId: RunId,
   executionId: string,
+  generation: Generation,
   dependencies: TestCommandDependencies,
 ): Promise<CompletedCase | null> {
   const caseId = toCaseId(identifier(dependencies));
@@ -325,53 +470,73 @@ async function executeOne(
     kind: "request",
     runId,
     caseId,
-    codecVersion: effective.problem.inputCodec,
-    messageLimitBytes: effective.limits.inputBytes,
+    codecVersion: context.problem.inputCodec,
+    messageLimitBytes: context.limits.inputBytes,
     input: fixedCase.input,
   });
-  if (requestBytes.length > effective.limits.inputBytes) {
-    throw new FixedCaseError(`encoded request exceeds configured input limit for ${fixedCase.relativePath}`);
+  if (requestBytes.length > context.limits.inputBytes) {
+    throw new FixedCaseError(
+      `encoded request exceeds configured input limit for ${fixedCase.relativePath}`,
+    );
   }
-  const implementation = relativeImplementation(problemRoot, effective.assets.entrypoint);
+  const implementation = relativeImplementation(
+    problemRoot,
+    context.assets.entrypoint,
+  );
   const request: ExecutionRequest = Object.freeze({
     runId,
     caseId,
-    problemFingerprint: fingerprint(effective),
+    problemFingerprint: fingerprint(context),
     implementation: { role: "solution" as const, relativePath: implementation },
     inputBytes: requestBytes,
-    inputCodecVersion: effective.problem.inputCodec,
-    outputCodecVersion: effective.problem.outputCodec,
-    limits: effective.limits,
-    generation: initialGeneration(),
+    inputCodecVersion: context.problem.inputCodec,
+    outputCodecVersion: context.problem.outputCodec,
+    limits: context.limits,
+    generation,
   });
-  const profile = bundle.profiler.begin();
-  const raw = await bundle.sandbox.run(bundle.runtime.buildInvocation(request), requestBytes, effective.limits, dependencies.cancellation);
+  const profile = runner.beginProfile();
+  const raw = await runner.run(
+    request,
+    requestBytes,
+    dependencies.cancellation,
+  );
   void profile.finish(raw);
   const rawFact = rawFactOf(raw, dependencies.sha256 ?? hashBytes);
   if (dependencies.cancellation.isCancellationRequested) {
-    // A signal that arrived while the child was active wins only because no
-    // verdict for this case has been formed yet; completed verdicts are never
-    // overwritten by later cancellation observation.
     return null;
   }
-  const termination = dependencies.classifyTermination(raw, effective.limits);
+  const termination = dependencies.classifyTermination(raw, context.limits);
   let status: TerminationCause = termination;
   let actual: CanonicalValue | null = null;
-  let mismatch: Readonly<{ path: string; reason: string; expected: string; actual: string }> | null = null;
+  let mismatch: Readonly<{
+    path: string;
+    reason: string;
+    expected: string;
+    actual: string;
+  }> | null = null;
+  let exceptionMessage: string | undefined;
   if (termination === "passed") {
     const response = decodeResponseLine(raw.stdout.data, {
       runId,
       caseId,
-      codecVersion: effective.problem.outputCodec,
+      codecVersion: context.problem.outputCodec,
     });
-    if (!response.ok || response.envelope.exception !== null || response.envelope.output === null) {
+    if (!response.ok) {
+      status = "protocol_error";
+    } else if (response.envelope.exception !== null) {
+      status = "protocol_error";
+      const exc = response.envelope.exception;
+      if (exc.tag === "exception") {
+        exceptionMessage = `Target exception: ${exc.type}: ${exc.message}`;
+      }
+    } else if (response.envelope.output === null) {
       status = "protocol_error";
     } else {
       actual = response.envelope.output;
       const compared = createOutputComparator().compare(
         fixedCase.expected,
         actual,
-        comparisonPolicy(effective.problem.comparisonPolicy),
+        comparisonPolicy(context.problem.comparisonPolicy),
       );
       if (!compared.equal) {
         status = "wrong_answer";
@@ -379,33 +544,72 @@ async function executeOne(
       }
     }
   }
+  const finalStatus = mostSevere(termination, status);
+  if (
+    finalStatus === "protocol_error" &&
+    !exceptionMessage &&
+    raw.stderr.data.length > 0
+  ) {
+    const text = new TextDecoder().decode(raw.stderr.data).trim();
+    if (text) exceptionMessage = text;
+  }
   return Object.freeze({
     case: fixedCase,
     caseId,
     executionId,
-    status: mostSevere(termination, status),
+    status: finalStatus,
     inputBytes: requestBytes,
     outputBytes: raw.stdout.data.length === 0 ? null : raw.stdout.data,
     actual,
     mismatch,
     raw: rawFact,
     durationMs: finiteNonNegative(raw.resources.wallTimeMs),
+    ...(exceptionMessage === undefined ? {} : { exceptionMessage }),
   });
 }
 
-function relativeImplementation(problemRoot: string, entrypoint: string): string {
+function relativeImplementation(
+  problemRoot: string,
+  entrypoint: string,
+): string {
   const value = relative(problemRoot, entrypoint);
   if (value === "" || value === ".." || value.startsWith(`..${sep}`)) {
     throw new FixedCaseError("solution path escapes the problem root");
   }
-  // The Python harness runs from the problem root (bound by the composition
-  // factory), so a relative script identity is mandatory and host paths never
-  // cross the execution request boundary.
   return value.split(sep).join("/");
 }
 
 function comparisonPolicy(version: string): ComparisonPolicy {
-  return Object.freeze({ version, equality: "semantic", normalizeWhitespace: false });
+  return Object.freeze({
+    version,
+    equality: "semantic",
+    normalizeWhitespace: false,
+  });
+}
+
+/** Surface bounded sandbox setup or protocol failure reasons at the command boundary. */
+function appendSandboxDiagnostics(
+  cases: readonly CompletedCase[],
+  diagnostics: TestDiagnostic[],
+): void {
+  const failure = cases.find((item) => item.status === "spawn_error");
+  const detail = failure?.raw.cleanupDiagnostics[0];
+  if (detail !== undefined) {
+    diagnostics.push({
+      code: "sandbox_setup_failed",
+      message: detail.length <= 1_000 ? detail : `${detail.slice(0, 997)}…`,
+    });
+  }
+  const protocolFailure = cases.find(
+    (item) => item.status === "protocol_error" && item.exceptionMessage,
+  );
+  if (protocolFailure?.exceptionMessage) {
+    const msg = protocolFailure.exceptionMessage;
+    diagnostics.push({
+      code: "protocol_error",
+      message: msg.length <= 1_000 ? msg : `${msg.slice(0, 997)}…`,
+    });
+  }
 }
 
 function aggregateStatus(cases: readonly CompletedCase[]): TerminationCause {
@@ -420,24 +624,31 @@ function summarize(
   cases: readonly CompletedCase[],
   artifactId: string | null,
 ): TestCommandResult {
+  const summaries = cases.map((item) => caseSummary(item));
+  const statusCounts: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
+  for (const item of summaries) {
+    statusCounts[item.status] = (statusCounts[item.status] ?? 0) + 1;
+  }
   return Object.freeze({
     runId,
     state,
     caseCount: cases.length,
-    passedCaseCount: cases.filter((item) => item.status === "passed").length,
+    passedCaseCount: summaries.filter((item) => item.status === "passed")
+      .length,
+    statusCounts: Object.freeze(statusCounts),
+    firstFailure: firstFailureSummary(cases) ?? null,
     artifactId,
-    cases: Object.freeze(cases.map((item) => Object.freeze({
-      caseId: item.caseId,
-      path: item.case.relativePath,
-      status: item.status,
-      durationMs: item.durationMs,
-    }))),
+    cases: Object.freeze(summaries),
   });
 }
 
 async function persist(
   prepared: Awaited<ReturnType<typeof prepare>>,
   runId: RunId,
+  generation: Generation,
   state: "completed" | "failed",
   status: TerminationCause,
   startedAt: string,
@@ -446,44 +657,76 @@ async function persist(
   artifact: { readonly id: string; readonly file: ArtifactFile } | null,
   dependencies: TestCommandDependencies,
 ): Promise<void> {
-  const problemId = `problem-${prepared.effective.problem.slug}`;
-  const implementationPath = relative(prepared.problemRoot, prepared.effective.assets.entrypoint).split(sep).join("/");
-  const implementationContent = await dependencies.readText(prepared.effective.assets.entrypoint);
-  // Source content, rather than an absolute host path, identifies a reusable
-  // implementation registration and remains stable across invocation roots.
+  const problemId = `problem-${prepared.context.problem.slug}`;
+  const implementationPath = relative(
+    prepared.problemRoot,
+    prepared.context.assets.entrypoint,
+  )
+    .split(sep)
+    .join("/");
+  const implementationContent = await dependencies.readText(
+    prepared.context.assets.entrypoint,
+  );
   const implementationId = `implementation-${hashText(implementationContent)}`;
   const first = cases[0];
   const run = {
     runId,
-    slug: prepared.effective.problem.slug,
+    slug: prepared.context.problem.slug,
     state,
     status,
-    problemFingerprint: fingerprint(prepared.effective),
+    problemFingerprint: fingerprint(prepared.context),
     seed: null,
-    limits: prepared.effective.limits,
-    inputCodecVersion: prepared.effective.problem.inputCodec,
-    outputCodecVersion: prepared.effective.problem.outputCodec,
-    comparisonPolicyVersion: prepared.effective.problem.comparisonPolicy,
-    inputHash: first === undefined ? hashText("") : (dependencies.sha256 ?? hashBytes)(first.inputBytes),
-    outputHash: first?.outputBytes === null || first === undefined ? null : (dependencies.sha256 ?? hashBytes)(first.outputBytes),
-    generation: initialGeneration(),
+    limits: prepared.context.limits,
+    inputCodecVersion: prepared.context.problem.inputCodec,
+    outputCodecVersion: prepared.context.problem.outputCodec,
+    comparisonPolicyVersion: prepared.context.problem.comparisonPolicy,
+    inputHash:
+      first === undefined
+        ? hashText("")
+        : (dependencies.sha256 ?? hashBytes)(first.inputBytes),
+    outputHash:
+      first?.outputBytes === null || first === undefined
+        ? null
+        : (dependencies.sha256 ?? hashBytes)(first.outputBytes),
+    generation,
     wallTimeUtc: startedAt,
     durationMs,
   } as const;
   await dependencies.transaction.transact(async (uow) => {
-    // Each run gets a stable problem/implementation identity only after the
-    // first registration. Reusing an existing row avoids duplicate-key failure
-    // while preserving the foreign-key order for run children.
-    const existingProblem = await uow.problems.findBySlug(prepared.effective.problem.slug);
+    const existingProblem = await uow.problems.findBySlug(
+      prepared.context.problem.slug,
+    );
     const persistedProblemId = existingProblem?.problem_id ?? problemId;
     if (existingProblem === null) {
-      await uow.problems.register({ problem_id: problemId, slug: prepared.effective.problem.slug, schema_version: prepared.effective.problem.schemaVersion, title: prepared.effective.problem.title, created_at: startedAt, updated_at: startedAt } satisfies TestProblemRow);
+      await uow.problems.register({
+        problem_id: problemId,
+        slug: prepared.context.problem.slug,
+        schema_version: prepared.context.problem.schemaVersion,
+        title: prepared.context.problem.title,
+        created_at: startedAt,
+        updated_at: startedAt,
+      } satisfies ProblemRow);
     }
-    await uow.implementations.register({ implementation_id: implementationId, problem_id: persistedProblemId, path: implementationPath, role: "solution", content_sha256: hashText(implementationContent), runtime: prepared.effective.problem.runtime, created_at: startedAt } satisfies TestImplementationRow);
+    await uow.implementations.register({
+      implementation_id: implementationId,
+      problem_id: persistedProblemId,
+      path: implementationPath,
+      role: "solution",
+      content_sha256: hashText(implementationContent),
+      runtime: prepared.context.problem.runtime,
+      created_at: startedAt,
+    } satisfies ImplementationRow);
     await uow.runs.commit(run);
     for (let ordinal = 0; ordinal < cases.length; ordinal += 1) {
       const item = cases[ordinal]!;
-      await uow.cases.commit({ case_id: item.caseId, run_id: runId, ordinal, input_sha256: (dependencies.sha256 ?? hashBytes)(item.inputBytes), input_bytes: BigInt(item.inputBytes.length), status: item.status } satisfies TestCaseRow);
+      await uow.cases.commit({
+        case_id: item.caseId,
+        run_id: runId,
+        ordinal,
+        input_sha256: (dependencies.sha256 ?? hashBytes)(item.inputBytes),
+        input_bytes: BigInt(item.inputBytes.length),
+        status: item.status,
+      } satisfies CaseRow);
       await uow.executions.commit({
         execution_id: item.executionId,
         case_id: item.caseId,
@@ -500,19 +743,35 @@ async function persist(
         stderr_truncated: item.raw.stderr.truncated ? 1 : 0,
         limit_cause: isLimitCause(item.status) ? item.status : null,
         raw_json: JSON.stringify(item.raw),
-      } satisfies TestExecutionRow);
+      } satisfies ExecutionRow);
     }
     if (artifact !== null) {
-      await uow.artifacts.commit({ artifact_id: artifact.id, run_id: runId, kind: "mismatch", path: artifact.file.path, sha256: artifact.file.sha256, size_bytes: artifact.file.sizeBytes, created_at: startedAt } satisfies TestArtifactRow);
+      await uow.artifacts.commit({
+        artifact_id: artifact.id,
+        run_id: runId,
+        kind: "mismatch",
+        path: artifact.file.path,
+        sha256: artifact.file.sha256,
+        size_bytes: artifact.file.sizeBytes,
+        created_at: startedAt,
+      } satisfies ArtifactRow);
     }
   });
 }
 
-/** Write one immutable mismatch artifact before its row joins the SQL transaction. */
-export async function writeMismatchArtifact(request: MismatchArtifactWrite): Promise<ArtifactFile> {
-  const directory = resolve(request.invocationDirectory, ".palestra", "artifacts");
+export async function writeMismatchArtifact(
+  request: MismatchArtifactWrite,
+): Promise<ArtifactFile> {
+  const directory = resolve(
+    request.invocationDirectory,
+    ".palestra",
+    "artifacts",
+  );
   const destination = resolve(directory, `${request.artifactId}.json`);
-  const temporary = resolve(directory, `.${request.artifactId}.${randomUUID()}.tmp`);
+  const temporary = resolve(
+    directory,
+    `.${request.artifactId}.${randomUUID()}.tmp`,
+  );
   await mkdir(directory, { recursive: true });
   const document = JSON.stringify({
     schemaVersion: FIXED_MISMATCH_ARTIFACT_VERSION,
@@ -522,7 +781,10 @@ export async function writeMismatchArtifact(request: MismatchArtifactWrite): Pro
       path: request.case.relativePath,
       input: JSON.parse(canonicalStringOf(request.case.input)),
       expected: JSON.parse(canonicalStringOf(request.case.expected)),
-      actual: request.actual === null ? null : JSON.parse(canonicalStringOf(request.actual)),
+      actual:
+        request.actual === null
+          ? null
+          : JSON.parse(canonicalStringOf(request.actual)),
     },
     mismatch: request.mismatch,
     rawExecution: request.raw,
@@ -537,42 +799,146 @@ export async function writeMismatchArtifact(request: MismatchArtifactWrite): Pro
     throw error;
   }
   return Object.freeze({
-    path: relative(request.invocationDirectory, destination).split(sep).join("/"),
+    path: relative(request.invocationDirectory, destination)
+      .split(sep)
+      .join("/"),
     sha256: hashBytes(bytes),
     sizeBytes: BigInt(bytes.length),
   });
 }
 
-function rawFactOf(raw: RawProcessResult, hash: (bytes: Uint8Array) => string): RawExecutionFact {
+function rawFactOf(
+  raw: RawProcessResult,
+  hash: (bytes: Uint8Array) => string,
+): RawExecutionFact {
   return Object.freeze({
     schemaVersion: 1,
     termination: raw.termination,
     exitCode: raw.exitCode,
     signal: raw.signal,
-    stdout: Object.freeze({ totalBytes: raw.stdout.totalBytes, truncated: raw.stdout.truncated, sha256: hash(raw.stdout.data), dataBase64Url: Buffer.from(raw.stdout.data).toString("base64url") }),
-    stderr: Object.freeze({ totalBytes: raw.stderr.totalBytes, truncated: raw.stderr.truncated, sha256: hash(raw.stderr.data), dataBase64Url: Buffer.from(raw.stderr.data).toString("base64url") }),
+    stdout: Object.freeze({
+      totalBytes: raw.stdout.totalBytes,
+      truncated: raw.stdout.truncated,
+      sha256: hash(raw.stdout.data),
+      dataBase64Url: Buffer.from(raw.stdout.data).toString("base64url"),
+    }),
+    stderr: Object.freeze({
+      totalBytes: raw.stderr.totalBytes,
+      truncated: raw.stderr.truncated,
+      sha256: hash(raw.stderr.data),
+      dataBase64Url: Buffer.from(raw.stderr.data).toString("base64url"),
+    }),
     resources: Object.freeze({ ...raw.resources }),
-    cleanupDiagnostics: Object.freeze(raw.cleanupDiagnostics.map((value) => value.slice(0, 256))),
+    cleanupDiagnostics: Object.freeze(
+      raw.cleanupDiagnostics.map((value) => value.slice(0, 256)),
+    ),
   });
 }
 
-async function confinedRealPath(path: string, root: string, label: string): Promise<string> {
-  const resolved = await realpath(path);
-  const rel = relative(root, resolved);
-  if (rel === ".." || rel.startsWith(`..${sep}`)) {
-    throw new FixedCaseError(`${label} escapes the problem root`);
-  }
-  return resolved;
+function fingerprint(context: RunContext): string {
+  return hashText(
+    JSON.stringify({ problem: context.problem, limits: context.limits }),
+  );
+}
+function identifier(dependencies: TestCommandDependencies): string {
+  return (dependencies.createId ?? randomUUID)();
+}
+function hashBytes(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+function hashText(text: string): string {
+  return hashBytes(new TextEncoder().encode(text));
+}
+function durationSince(start: bigint, finish: bigint): number {
+  return finiteNonNegative(Number(finish - start) / 1_000_000) ?? 0;
+}
+function finiteNonNegative(value: number): number | null {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+function millisecondsToNs(value: number): bigint | null {
+  return Number.isFinite(value) && value >= 0
+    ? BigInt(Math.trunc(value * 1_000_000))
+    : null;
+}
+function caseSummary(item: CompletedCase): TestCaseSummary {
+  return Object.freeze({
+    caseId: item.caseId,
+    path: item.case.relativePath,
+    status: item.status,
+    durationMs: item.durationMs,
+  });
 }
 
-function fingerprint(effective: EffectiveConfig): string {
-  return hashText(JSON.stringify({ problem: effective.problem, limits: effective.limits }));
+function firstFailureSummary(
+  cases: readonly CompletedCase[],
+): (TestCaseSummary & TestFailureDetails) | undefined {
+  const item = cases.find((caseResult) => caseResult.status !== "passed");
+  if (item === undefined) return undefined;
+  return Object.freeze({
+    ...caseSummary(item),
+    input: renderCaseValue(item.case.input),
+    expected: renderCaseValue(item.case.expected),
+    actual: item.actual === null ? null : renderCaseValue(item.actual),
+    error: failureError(item),
+  });
 }
-function identifier(dependencies: TestCommandDependencies): string { return (dependencies.createId ?? randomUUID)(); }
-function hashBytes(bytes: Uint8Array): string { return createHash("sha256").update(bytes).digest("hex"); }
-function hashText(text: string): string { return hashBytes(new TextEncoder().encode(text)); }
-function durationSince(start: bigint, finish: bigint): number { return finiteNonNegative(Number(finish - start) / 1_000_000) ?? 0; }
-function finiteNonNegative(value: number): number | null { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
-function millisecondsToNs(value: number): bigint | null { return Number.isFinite(value) && value >= 0 ? BigInt(Math.trunc(value * 1_000_000)) : null; }
-function isLimitCause(status: TerminationCause): boolean { return ["tle_wall", "tle_cpu", "mle", "output_limit", "file_limit", "process_limit"].includes(status); }
-function diagnostic(code: string, error: unknown): TestDiagnostic { return { code, message: error instanceof Error ? error.message : String(error) }; }
+
+/** Render the LeetCode-facing value rather than exposing tagged wire values. */
+function renderCaseValue(value: CanonicalValue): string {
+  return JSON.stringify(toDisplayValue(value));
+}
+
+function toDisplayValue(value: CanonicalValue): unknown {
+  switch (value.tag) {
+    case "null":
+      return null;
+    case "bool":
+    case "str":
+      return value.value;
+    case "int":
+      return Number.isSafeInteger(Number(value.value))
+        ? Number(value.value)
+        : value.value.toString();
+    case "float":
+      return value.negativeZero ? -0 : Number(value.value);
+    case "list":
+    case "tuple":
+      return value.items.map(toDisplayValue);
+    case "ListNode":
+      return value.values.map(toDisplayValue);
+    case "TreeNode":
+      return value.values.map((item) =>
+        item === null ? null : toDisplayValue(item),
+      );
+    default:
+      return canonicalStringOf(value);
+  }
+}
+
+function failureError(item: CompletedCase): string | null {
+  if (item.exceptionMessage !== undefined) return item.exceptionMessage;
+  if (item.status === "wrong_answer") return null;
+  if (item.mismatch !== null) return item.mismatch.reason;
+  const stderr = new TextDecoder()
+    .decode(Buffer.from(item.raw.stderr.dataBase64Url, "base64url"))
+    .trim();
+  if (stderr) return stderr;
+  return `Execution failed with status ${item.status}`;
+}
+
+function isLimitCause(status: TerminationCause): boolean {
+  return [
+    "tle_wall",
+    "tle_cpu",
+    "mle",
+    "output_limit",
+    "file_limit",
+    "process_limit",
+  ].includes(status);
+}
+function diagnostic(code: string, error: unknown): TestDiagnostic {
+  return {
+    code,
+    message: error instanceof Error ? error.message : String(error),
+  };
+}

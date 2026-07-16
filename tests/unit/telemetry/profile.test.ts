@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RawProcessResult } from "../../../src/domain/index.js";
-import type { Clock } from "../../../src/execution/ports/index.js";
+import type { Clock } from "../../../src/execution/clock.js";
 import { createExecutionProfiler } from "../../../src/telemetry/index.js";
 
 const clock: Clock = {
@@ -26,7 +26,7 @@ const raw: RawProcessResult = {
 
 describe("createExecutionProfiler", () => {
   it("preserves measured zero and represents unavailable fields as null", () => {
-    const profiler = createExecutionProfiler("test-backend", clock, {
+    const profiler = createExecutionProfiler(clock, {
       status: "passed",
       limitCause: null,
     });

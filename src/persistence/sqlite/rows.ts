@@ -21,8 +21,6 @@
  * This module declares only shapes; it imports nothing and holds no runtime.
  */
 
-import type { PersistenceRecords } from "../ports/index.js";
-
 /** A stored boolean: `1` true, `0` false, `null` unknown/not applicable. */
 export type SqliteBool = 0 | 1 | null;
 
@@ -121,6 +119,8 @@ export interface RunRow {
   readonly benchmark_sample_count: number | null;
   /** Benchmark ordering seed as unsigned-64 decimal text, or `null`. */
   readonly benchmark_order_seed: string | null;
+  /** SHA-256 over the ordered explicit implementation plan, or `null`. */
+  readonly benchmark_plan_sha256: string | null;
   /** Comparability flag: `1` comparable, `0` non-comparable, `null` n/a. */
   readonly benchmark_comparability: SqliteBool;
   /** Reason string, required iff `benchmark_comparability` is `0`, else `null`. */
@@ -315,33 +315,4 @@ export interface DailyMetricRow {
   readonly wall_ns: bigint;
   /** First-solved timestamp (UTC ISO-8601), or `null` when unsolved. */
   readonly solved_at: string | null;
-}
-
-/**
- * The concrete {@link PersistenceRecords} instantiation for the SQLite adapter.
- *
- * This refines every generic slot the ports left as `unknown`, so the
- * repositories and transaction scope are type-checked against real column
- * shapes. It is the type the composition root and the contract-test fixtures
- * instantiate the store at.
- */
-export interface SqlitePersistenceRecords extends PersistenceRecords {
-  /** Problem records are {@link ProblemRow}s. */
-  readonly problem: ProblemRow;
-  /** Implementation records are {@link ImplementationRow}s. */
-  readonly implementation: ImplementationRow;
-  /** Fixed-case records are {@link CaseRow}s. */
-  readonly case: CaseRow;
-  /** Per-case execution records are {@link ExecutionRow}s. */
-  readonly execution: ExecutionRow;
-  /** Artifact records are {@link ArtifactRow}s. */
-  readonly artifact: ArtifactRow;
-  /** Immutable replay-link records are {@link ReplayRow}s. */
-  readonly replay: ReplayRow;
-  /** Per-sample benchmark records are {@link BenchmarkSampleRow}s. */
-  readonly benchmarkSample: BenchmarkSampleRow;
-  /** Aggregated benchmark records are {@link BenchmarkAggregateRow}s. */
-  readonly benchmarkAggregate: BenchmarkAggregateRow;
-  /** Daily metric records are {@link DailyMetricRow}s. */
-  readonly metric: DailyMetricRow;
 }

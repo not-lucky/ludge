@@ -5,15 +5,12 @@
  * its writer connection and therefore to the enclosing transaction.
  */
 
-import type { ArtifactWriter } from "../../ports/index.js";
 import type { SqliteConnection } from "../connection.js";
 import { insertObject } from "../row-io.js";
-import type { ArtifactRow, SqlitePersistenceRecords } from "../rows.js";
+import type { ArtifactRow } from "../rows.js";
 
 /** Writes artifact rows through one SQLite transaction connection. */
-export class SqliteArtifactRepository
-  implements ArtifactWriter<SqlitePersistenceRecords>
-{
+export class SqliteArtifactRepository {
   public constructor(private readonly db: SqliteConnection) {}
 
   /** Commit an artifact row. Durable only when the transaction commits. */

@@ -59,11 +59,7 @@ export interface ExecutionRequest {
 
 /** How a target process ultimately terminated. */
 export type TerminationKind =
-  | "exited"
-  | "signaled"
-  | "timed_out"
-  | "killed"
-  | "spawn_failed";
+  "exited" | "signaled" | "timed_out" | "killed" | "spawn_failed";
 
 /**
  * Bounded capture of a single output stream.
@@ -97,6 +93,16 @@ export interface ResourceObservations {
   readonly oomKills: number;
   /** Peak live process count observed. */
   readonly peakProcessCount: number;
+  /** Whether a benchmark-requested cgroup CPU weight was installed. */
+  readonly cpuWeightApplied?: boolean;
+}
+
+/** Monotonic phase facts captured by a sandbox that can expose them. */
+export interface ExecutionPhaseDurations {
+  /** Control/temp-root setup through child registration, in nanoseconds. */
+  readonly setupNs: bigint | null;
+  /** Registered child lifecycle through bounded output collection, in nanoseconds. */
+  readonly targetNs: bigint | null;
 }
 
 /**
@@ -121,4 +127,6 @@ export interface RawProcessResult {
   readonly resources: ResourceObservations;
   /** Non-fatal cleanup diagnostics (e.g. cgroup removal warnings). */
   readonly cleanupDiagnostics: readonly string[];
+  /** Optional monotonic lifecycle phase durations supplied by the sandbox. */
+  readonly phases?: ExecutionPhaseDurations;
 }

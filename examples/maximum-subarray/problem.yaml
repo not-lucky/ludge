@@ -1,0 +1,10 @@
+schemaVersion: 1
+slug: maximum-subarray
+title: Maximum Subarray
+entrypoint: solution.py
+limits: {}
+casesDir: cases
+generator: generator.py
+naive: naive.py
+args: ["list[int]"]
+returns: int

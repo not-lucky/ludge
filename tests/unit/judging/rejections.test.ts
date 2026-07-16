@@ -9,7 +9,7 @@ import {
   createTaggedJsonlV1Codec,
   MAX_PAYLOAD_BYTES,
 } from "../../../src/judging/codec/index.js";
-import type { CanonicalValue } from "../../../src/judging/value/index.js";
+import type { CanonicalValue } from "../../../src/judging/value/model.js";
 
 const codec = createTaggedJsonlV1Codec("test-backend");
 
@@ -91,13 +91,13 @@ describe("decode rejections (classified protocol_error)", () => {
   });
 
   it("rejects a TreeNode with an unreachable node", () => {
-    rejects(
-      '{"tag":"TreeNode","values":[null,{"tag":"int","value":1},null]}',
-    );
+    rejects('{"tag":"TreeNode","values":[null,{"tag":"int","value":1},null]}');
   });
 
   it("rejects a ListNode cycleIndex out of range", () => {
-    rejects('{"tag":"ListNode","values":[{"tag":"int","value":1}],"cycleIndex":5}');
+    rejects(
+      '{"tag":"ListNode","values":[{"tag":"int","value":1}],"cycleIndex":5}',
+    );
   });
 
   it("rejects nesting deeper than the depth limit", () => {

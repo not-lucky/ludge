@@ -1,20 +1,24 @@
 /**
  * Strict, bounded fixed-case loading for the `test` command.
  *
- * Case assets are static JSON documents, not runtime protocol envelopes. Every
- * file must contain exactly `{ "input": CanonicalValue, "expected":
- * CanonicalValue }`; request/response envelope identities are added only by the
- * test facade immediately before launching the target.
+ * Case assets are static JSON documents, not runtime protocol envelopes. A
+ * legacy file may contain exactly `{ "input": ..., "expected": ... }`. A
+ * grouped file must contain exactly `{ "cases": [<legacy-case>, ...] }`; the
+ * array must be non-empty and every member is validated as a strict legacy
+ * case. The problem signature gives every plain JSON value its type. Request/
+ * response envelope identities are added only by the test facade immediately
+ * before launching the target. `--case` selects one file and therefore every
+ * logical member in that file.
  */
 
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
-import { buildValue } from "../judging/codec/decode.js";
-import { CanonicalValidationError } from "../judging/codec/errors.js";
+import { decodeLeetCodeCase, LeetCodeValueError } from "../judging/leetcode.js";
+import type { Problem } from "../infrastructure/problem.js";
 import { parseJson, type JsonNode } from "../judging/codec/json.js";
-import { Budget, MAX_PAYLOAD_BYTES } from "../judging/codec/limits.js";
+import { MAX_PAYLOAD_BYTES } from "../judging/codec/limits.js";
 import { decodeUtf8Fatal } from "../judging/codec/utf8.js";
-import type { CanonicalValue } from "../judging/value/index.js";
+import type { CanonicalValue } from "../judging/value/model.js";
 
 /** A fixed case after its static JSON document has been validated. */
 export interface FixedCase {
@@ -38,6 +42,8 @@ export interface FixedCaseSelection {
   readonly invocationDirectory: string;
   /** Raw `--case` text, when only one file should be selected. */
   readonly caseOverride?: string;
+  /** Parsed problem signature that gives plain JSON values their meaning. */
+  readonly problem: Problem;
   /** Maximum permitted raw case-document bytes. Defaults to codec payload cap. */
   readonly maxBytes?: number;
 }
@@ -68,11 +74,20 @@ export async function* streamFixedCases(
 
   if (selection.caseOverride !== undefined) {
     const path = await resolveCaseOverride(selection, roots.problemRoot);
-    yield await readFixedCase(path, roots.problemRoot, maxBytes);
+    yield* await readFixedCases(
+      path,
+      roots.problemRoot,
+      selection.problem,
+      maxBytes,
+    );
     return;
   }
 
-  const directory = await requireRealDirectory(selection.casesDir, roots.problemRoot, "cases directory");
+  const directory = await requireRealDirectory(
+    selection.casesDir,
+    roots.problemRoot,
+    "cases directory",
+  );
   let entries: readonly string[];
   try {
     entries = await readdir(directory);
@@ -82,26 +97,47 @@ export async function* streamFixedCases(
   for (const entry of [...entries].sort(compareLexical)) {
     const candidate = resolve(directory, entry);
     if (extname(entry) !== ".json") {
-      throw new FixedCaseError(`case directory contains non-.json entry: ${entry}`);
+      throw new FixedCaseError(
+        `case directory contains non-.json entry: ${entry}`,
+      );
     }
-    yield await readFixedCase(candidate, roots.problemRoot, maxBytes);
+    yield* await readFixedCases(
+      candidate,
+      roots.problemRoot,
+      selection.problem,
+      maxBytes,
+    );
   }
 }
 
-/** Parse one bounded static case document at a known confined regular file. */
-export async function readFixedCase(
+/**
+ * Parse one bounded, confined case file into its ordered logical cases.
+ *
+ * A grouped file is read only once and fully validated before any member is
+ * yielded. Thus an invalid later member cannot launch an earlier case from the
+ * same untrusted file. Every logical case, including a legacy single document,
+ * uses the stable `file#array-index` display path.
+ */
+export async function readFixedCases(
   path: string,
   problemRoot: string,
+  problem: Problem,
   maxBytes = MAX_PAYLOAD_BYTES,
-): Promise<FixedCase> {
+): Promise<readonly FixedCase[]> {
   assertBound(maxBytes, "maximum case byte size");
   const roots = await resolveRoots({ problemRoot });
-  const actualPath = await requireRealRegularFile(path, roots.problemRoot, "case file");
+  const actualPath = await requireRealRegularFile(
+    path,
+    roots.problemRoot,
+    "case file",
+  );
   let bytes: Uint8Array;
   try {
     const info = await stat(actualPath);
     if (info.size > maxBytes) {
-      throw new FixedCaseError(`case file exceeds ${maxBytes} bytes: ${displayPath(actualPath)}`);
+      throw new FixedCaseError(
+        `case file exceeds ${maxBytes} bytes: ${displayPath(actualPath)}`,
+      );
     }
     bytes = await readFile(actualPath);
   } catch (error) {
@@ -109,27 +145,65 @@ export async function readFixedCase(
     throw fileFailure("cannot read case file", actualPath, error);
   }
   if (bytes.length > maxBytes) {
-    throw new FixedCaseError(`case file exceeds ${maxBytes} bytes: ${displayPath(actualPath)}`);
+    throw new FixedCaseError(
+      `case file exceeds ${maxBytes} bytes: ${displayPath(actualPath)}`,
+    );
   }
-  const decoded = decodeFixedCaseDocument(bytes, displayPath(actualPath));
-  return Object.freeze({
-    path: actualPath,
-    relativePath: toProblemRelative(roots.problemRoot, actualPath),
-    ...decoded,
-  });
+  const decoded = decodeFixedCaseDocument(
+    bytes,
+    problem,
+    displayPath(actualPath),
+  );
+  const relativePath = toProblemRelative(roots.problemRoot, actualPath);
+  return Object.freeze(
+    decoded.map((item, index) =>
+      Object.freeze({
+        path: actualPath,
+        relativePath: `${relativePath}#${index}`,
+        input: item.input,
+        expected: item.expected,
+      }),
+    ),
+  );
+}
+
+/** Parse one legacy file, rejecting grouped documents with more than one case. */
+export async function readFixedCase(
+  path: string,
+  problemRoot: string,
+  problem: Problem,
+  maxBytes = MAX_PAYLOAD_BYTES,
+): Promise<FixedCase> {
+  const cases = await readFixedCases(path, problemRoot, problem, maxBytes);
+  if (cases.length !== 1) {
+    throw new FixedCaseError(
+      "grouped case file contains multiple logical cases",
+    );
+  }
+  return cases[0]!;
+}
+
+export interface DecodedFixedCases extends ReadonlyArray<
+  Readonly<{
+    input: CanonicalValue;
+    expected: CanonicalValue;
+  }>
+> {
+  readonly grouped: boolean;
 }
 
 /**
  * Decode strict static case bytes without using lossy `JSON.parse`.
  *
  * `parseJson` rejects duplicate object keys and preserves numeric lexemes;
- * `buildValue` subsequently validates each tagged value and constructs bigint
- * integers exactly as the runtime codec does.
+ * every group member is independently checked with the same strict LeetCode
+ * decoder as a legacy document.
  */
 export function decodeFixedCaseDocument(
   bytes: Uint8Array,
+  problem: Problem,
   source = "case file",
-): Readonly<{ input: CanonicalValue; expected: CanonicalValue }> {
+): DecodedFixedCases {
   if (bytes.length > MAX_PAYLOAD_BYTES) {
     throw new FixedCaseError(`${source} exceeds ${MAX_PAYLOAD_BYTES} bytes`);
   }
@@ -137,21 +211,75 @@ export function decodeFixedCaseDocument(
   try {
     text = decodeUtf8Fatal(bytes);
   } catch (error) {
-    throw new FixedCaseError(`${source} is not valid UTF-8: ${messageOf(error)}`);
+    throw new FixedCaseError(
+      `${source} is not valid UTF-8: ${messageOf(error)}`,
+    );
   }
   const parsed = parseJson(text);
   if (!parsed.ok) {
-    throw new FixedCaseError(`${source} contains invalid JSON: ${parsed.error.message}`);
+    throw new FixedCaseError(
+      `${source} contains invalid JSON: ${parsed.error.message}`,
+    );
   }
-  const fields = requireCaseObject(parsed.node, source);
+  const members = decodeDocumentNode(parsed.node, problem, source);
+  return Object.freeze(
+    Object.assign(members, { grouped: isGroupedDocument(parsed.node) }),
+  );
+}
+
+function decodeDocumentNode(
+  node: JsonNode,
+  problem: Problem,
+  source: string,
+): readonly Readonly<{ input: CanonicalValue; expected: CanonicalValue }>[] {
+  if (isGroupedDocument(node)) {
+    const members = requireGroupObject(node, source);
+    return members.map((member, index) =>
+      decodeCaseNode(member, problem, `${source} case #${index}`),
+    );
+  }
+  return [decodeCaseNode(node, problem, source)];
+}
+
+function isGroupedDocument(node: JsonNode): boolean {
+  return node.kind === "object" && node.members.has("cases");
+}
+
+function requireGroupObject(
+  node: JsonNode,
+  source: string,
+): readonly JsonNode[] {
+  if (node.kind !== "object")
+    throw new FixedCaseError(`${source} root must be an object`);
+  if (node.members.size !== 1 || !node.members.has("cases")) {
+    throw new FixedCaseError(
+      `${source} grouped wrapper must contain exactly the key "cases"`,
+    );
+  }
+  const cases = node.members.get("cases")!;
+  if (cases.kind !== "array") {
+    throw new FixedCaseError(`${source} "cases" must be an array`);
+  }
+  if (cases.items.length === 0) {
+    throw new FixedCaseError(`${source} "cases" must not be empty`);
+  }
+  return cases.items;
+}
+
+function decodeCaseNode(
+  node: JsonNode,
+  problem: Problem,
+  source: string,
+): Readonly<{ input: CanonicalValue; expected: CanonicalValue }> {
+  const fields = requireCaseObject(node, source);
   try {
-    return Object.freeze({
-      input: buildValue(fields.input, new Budget()),
-      expected: buildValue(fields.expected, new Budget()),
-    });
+    return Object.freeze(
+      decodeLeetCodeCase(fields.input, fields.expected, problem),
+    );
   } catch (error) {
-    const detail = error instanceof CanonicalValidationError ? error.message : messageOf(error);
-    throw new FixedCaseError(`${source} contains an invalid canonical value: ${detail}`);
+    const detail =
+      error instanceof LeetCodeValueError ? error.message : messageOf(error);
+    throw new FixedCaseError(`${source} contains an invalid value: ${detail}`);
   }
 }
 
@@ -169,17 +297,29 @@ async function resolveCaseOverride(
     ? resolve(override)
     : resolve(selection.invocationDirectory, override);
   if (await exists(invocationCandidate)) {
-    return requireRealRegularFile(invocationCandidate, problemRoot, "selected case file");
+    return requireRealRegularFile(
+      invocationCandidate,
+      problemRoot,
+      "selected case file",
+    );
   }
   if (isAbsolute(override)) {
-    throw new FixedCaseError(`selected case file does not exist: ${displayPath(invocationCandidate)}`);
+    throw new FixedCaseError(
+      `selected case file does not exist: ${displayPath(invocationCandidate)}`,
+    );
   }
   const fallback = resolve(selection.casesDir, override);
   return requireRealRegularFile(fallback, problemRoot, "selected case file");
 }
 
-async function resolveRoots(selection: Pick<FixedCaseSelection, "problemRoot">): Promise<{ problemRoot: string }> {
-  const problemRoot = await requireRealDirectory(selection.problemRoot, undefined, "problem root");
+async function resolveRoots(
+  selection: Pick<FixedCaseSelection, "problemRoot">,
+): Promise<{ problemRoot: string }> {
+  const problemRoot = await requireRealDirectory(
+    selection.problemRoot,
+    undefined,
+    "problem root",
+  );
   return { problemRoot };
 }
 
@@ -202,7 +342,10 @@ async function requireRealDirectory(
   } catch (error) {
     throw fileFailure(`cannot stat ${label}`, resolved, error);
   }
-  if (!info.isDirectory()) throw new FixedCaseError(`${label} is not a directory: ${displayPath(path)}`);
+  if (!info.isDirectory())
+    throw new FixedCaseError(
+      `${label} is not a directory: ${displayPath(path)}`,
+    );
   return resolved;
 }
 
@@ -215,7 +358,9 @@ async function requireRealRegularFile(
     throw new FixedCaseError(`${label} path contains a NUL byte`);
   }
   if (extname(path) !== ".json") {
-    throw new FixedCaseError(`${label} must have a .json extension: ${displayPath(path)}`);
+    throw new FixedCaseError(
+      `${label} must have a .json extension: ${displayPath(path)}`,
+    );
   }
   const actual = await requireNotSymlink(path, label);
   let resolved: string;
@@ -231,7 +376,10 @@ async function requireRealRegularFile(
   } catch (error) {
     throw fileFailure(`cannot stat ${label}`, resolved, error);
   }
-  if (!info.isFile()) throw new FixedCaseError(`${label} is not a regular file: ${displayPath(path)}`);
+  if (!info.isFile())
+    throw new FixedCaseError(
+      `${label} is not a regular file: ${displayPath(path)}`,
+    );
   return resolved;
 }
 
@@ -243,24 +391,41 @@ async function requireNotSymlink(path: string, label: string): Promise<string> {
     throw fileFailure(`${label} does not exist`, path, error);
   }
   if (info.isSymbolicLink()) {
-    throw new FixedCaseError(`${label} must not be a symbolic link: ${displayPath(path)}`);
+    throw new FixedCaseError(
+      `${label} must not be a symbolic link: ${displayPath(path)}`,
+    );
   }
   return path;
 }
 
-function requireCaseObject(node: JsonNode, source: string): { input: JsonNode; expected: JsonNode } {
-  if (node.kind !== "object") throw new FixedCaseError(`${source} root must be an object`);
+function requireCaseObject(
+  node: JsonNode,
+  source: string,
+): { input: JsonNode; expected: JsonNode } {
+  if (node.kind !== "object")
+    throw new FixedCaseError(`${source} root must be an object`);
   const keys = [...node.members.keys()];
-  if (keys.length !== 2 || !node.members.has("input") || !node.members.has("expected")) {
-    throw new FixedCaseError(`${source} must contain exactly the keys "input" and "expected"`);
+  if (
+    keys.length !== 2 ||
+    !node.members.has("input") ||
+    !node.members.has("expected")
+  ) {
+    throw new FixedCaseError(
+      `${source} must contain exactly the keys "input" and "expected"`,
+    );
   }
-  return { input: node.members.get("input")!, expected: node.members.get("expected")! };
+  return {
+    input: node.members.get("input")!,
+    expected: node.members.get("expected")!,
+  };
 }
 
 function assertInside(root: string, candidate: string, label: string): void {
   const rel = relative(root, candidate);
   if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-    throw new FixedCaseError(`${label} escapes the problem root: ${displayPath(candidate)}`);
+    throw new FixedCaseError(
+      `${label} escapes the problem root: ${displayPath(candidate)}`,
+    );
   }
 }
 
@@ -272,7 +437,9 @@ function toProblemRelative(root: string, path: string): string {
 
 function assertBound(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_PAYLOAD_BYTES) {
-    throw new FixedCaseError(`${label} must be a positive safe integer no greater than ${MAX_PAYLOAD_BYTES}`);
+    throw new FixedCaseError(
+      `${label} must be a positive safe integer no greater than ${MAX_PAYLOAD_BYTES}`,
+    );
   }
 }
 
@@ -297,6 +464,12 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function fileFailure(action: string, path: string, error: unknown): FixedCaseError {
-  return new FixedCaseError(`${action}: ${displayPath(path)} (${messageOf(error)})`);
+function fileFailure(
+  action: string,
+  path: string,
+  error: unknown,
+): FixedCaseError {
+  return new FixedCaseError(
+    `${action}: ${displayPath(path)} (${messageOf(error)})`,
+  );
 }

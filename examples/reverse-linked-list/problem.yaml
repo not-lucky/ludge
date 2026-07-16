@@ -1,0 +1,8 @@
+schemaVersion: 1
+slug: reverse-linked-list
+title: Reverse Linked List
+entrypoint: solution.py
+limits: {}
+casesDir: cases
+args: [ListNode]
+returns: ListNode

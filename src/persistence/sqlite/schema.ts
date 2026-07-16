@@ -18,7 +18,7 @@ import type { SqliteConnection } from "./connection.js";
 import { SchemaVersionError } from "./errors.js";
 
 /** The schema version this build creates and understands. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * The persisted table names, in dependency order (parents before children).
@@ -110,6 +110,7 @@ CREATE TABLE run (
   benchmark_warmups              INTEGER,
   benchmark_sample_count         INTEGER,
   benchmark_order_seed           TEXT,
+  benchmark_plan_sha256          TEXT,
   benchmark_comparability        INTEGER,
   benchmark_comparability_reason TEXT,
   CHECK (
@@ -286,7 +287,20 @@ export function migrate(db: SqliteConnection): void {
         created_at TEXT NOT NULL
       );
       CREATE INDEX idx_replay_source_artifact ON replay (source_artifact_id);
-      PRAGMA user_version = ${SCHEMA_VERSION}`);
+      PRAGMA user_version = 2`);
+      db.exec("COMMIT");
+      migrate(db);
+      return;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  if (version === 2) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(`ALTER TABLE run ADD COLUMN benchmark_plan_sha256 TEXT;
+        PRAGMA user_version = ${SCHEMA_VERSION}`);
       db.exec("COMMIT");
       return;
     } catch (error) {

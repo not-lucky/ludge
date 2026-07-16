@@ -1,11 +1,11 @@
 /** Exact CLI command grammar, immutable command values, and handler seams. */
 
 import { randomUUID } from "node:crypto";
-import { isValidSlug } from "../infrastructure/config/slug.js";
+import { isValidSlug } from "../infrastructure/problem.js";
 import { invalidInput } from "./error.js";
 import type { CliOutcome } from "./outcome.js";
-import { COMMAND_NAMES, type CommandName, type JsonValue } from "./types.js";
 import { invalidInputOutcome, outcome } from "./outcome.js";
+import { COMMAND_NAMES, type CommandName } from "./types.js";
 
 type CommandBase<Name extends CommandName, Options extends object> = Readonly<{
   readonly name: Name;
@@ -13,13 +13,17 @@ type CommandBase<Name extends CommandName, Options extends object> = Readonly<{
   readonly options: Readonly<Options>;
 }>;
 
-export type InitCommand = CommandBase<"init", { readonly slug: string }>;
+export type InitCommand = CommandBase<
+  "init",
+  { readonly slug: string; readonly json: boolean }
+>;
 export type TestCommand = CommandBase<
   "test",
   {
     readonly slug: string;
     readonly solution: string | undefined;
     readonly case: string | undefined;
+    readonly jobs: number | undefined;
     readonly json: boolean;
     readonly unsafeLocal: boolean;
   }
@@ -47,6 +51,7 @@ export type WatchCommand = CommandBase<
     readonly slug: string;
     readonly solution: string | undefined;
     readonly debounce: number | undefined;
+    readonly jobs: number | undefined;
     readonly json: boolean;
     readonly unsafeLocal: boolean;
   }
@@ -65,11 +70,19 @@ export type BenchmarkCommand = CommandBase<
 >;
 export type ReportCommand = CommandBase<
   "report",
-  { readonly slug: string | undefined; readonly since: string | undefined; readonly json: boolean }
+  {
+    readonly slug: string | undefined;
+    readonly since: string | undefined;
+    readonly json: boolean;
+  }
 >;
 export type ReplayCommand = CommandBase<
   "replay",
-  { readonly artifactId: string; readonly json: boolean; readonly unsafeLocal: boolean }
+  {
+    readonly artifactId: string;
+    readonly json: boolean;
+    readonly unsafeLocal: boolean;
+  }
 >;
 
 export type Command =
@@ -80,9 +93,6 @@ export type Command =
   | BenchmarkCommand
   | ReportCommand
   | ReplayCommand;
-
-/** Commands are deliberately JSON-safe; in particular, uint64 seeds are text. */
-export type SerializedCommand = Command;
 
 export interface ParseSuccess {
   readonly ok: true;
@@ -111,6 +121,60 @@ const UNSAFE_LOCAL_COMMANDS: ReadonlySet<CommandName> = new Set([
 const MAX_SAFE_INTEGER_TEXT = BigInt(Number.MAX_SAFE_INTEGER);
 const UINT64_MAX = (1n << 64n) - 1n;
 
+const HELP_TEXT = `palestra — a local, extensible LeetCode-style judge
+
+Usage: palestra <command> [options]
+
+Commands:
+  init <slug>             Scaffold a new problem directory
+  test <slug>             Run test cases for a problem
+  stress-test <slug>      Fuzz-test with generated cases
+  watch <slug>            Re-run tests on file changes
+  benchmark <slug>        Compare solution performance
+  report [slug]           Show historical test results
+  replay <artifact-id>    Re-run a recorded test artifact
+
+Global options:
+  --help                  Show this help message
+  --json                  Emit output as a JSON envelope
+  --unsafe-local          Skip sandbox enforcement (test, stress-test, watch, benchmark, replay)
+
+Command options:
+  init:
+    --json                Emit the result as a JSON envelope
+
+  test:
+    --solution <path>     Path to solution file
+    --case <path>         Path to a specific test-case file/group
+    --jobs <n>            Parallel fixed-case worker count
+
+  stress-test:
+    --generator <path>    Path to input generator
+    --naive <path>        Path to naive/brute-force solution
+    --solution <path>     Path to solution file
+    --seed <uint64>       Fixed RNG seed
+    --cases <n>           Number of cases to generate
+    --duration <seconds>  Time limit for the stress run
+    --jobs <n>            Parallel worker count
+    --shrink              Attempt to minimize failing input
+
+  watch:
+    --solution <path>     Path to solution file
+    --debounce <ms>       Debounce interval in milliseconds
+    --jobs <n>            Parallel fixed-case worker count per rerun
+
+  benchmark:
+    --solutions <a,b,...> Comma-separated solution paths (≥ 2)
+    --cases <path>        Path to benchmark case set
+    --warmup <n>          Warmup iterations (0 to skip)
+    --samples <n>         Sample iterations per solution
+
+  report:
+    --since <YYYY-MM-DD>  Filter results after this date
+
+  replay:
+    (no additional options)`;
+
 /**
  * Parse the documented grammar without using process state. All malformed input
  * is returned as an `invalid_input` outcome, never thrown to the bootstrap.
@@ -120,10 +184,21 @@ export function parseCommand(
   dependencies: ParseDependencies = {},
 ): ParseResult {
   const jsonRequested = argv.includes("--json");
+  if (argv.includes("--help") || argv[0] === "help") {
+    return Object.freeze({
+      ok: false,
+      command: null,
+      json: jsonRequested,
+      outcome: outcome("passed", HELP_TEXT),
+    });
+  }
   try {
     const unsafeIndexes = indexesOf(argv, "--unsafe-local");
     if (unsafeIndexes.length > 1) {
-      throw invalidInput("--unsafe-local may be supplied at most once", "duplicate_option");
+      throw invalidInput(
+        "--unsafe-local may be supplied at most once",
+        "duplicate_option",
+      );
     }
     const withoutUnsafe = argv.filter((_, index) => index !== unsafeIndexes[0]);
     const rawName = withoutUnsafe[0];
@@ -131,23 +206,43 @@ export function parseCommand(
       throw invalidInput("a command is required", "missing_command");
     }
     if (!isCommandName(rawName)) {
-      throw invalidInput(`unknown command ${JSON.stringify(rawName)}`, "unknown_command");
+      throw invalidInput(
+        `unknown command ${JSON.stringify(rawName)}`,
+        "unknown_command",
+      );
     }
     const unsafeLocal = unsafeIndexes.length === 1;
     if (unsafeLocal && !UNSAFE_LOCAL_COMMANDS.has(rawName)) {
-      throw invalidInput(`--unsafe-local is not accepted by ${rawName}`, "unsupported_option");
+      throw invalidInput(
+        `--unsafe-local is not accepted by ${rawName}`,
+        "unsupported_option",
+      );
     }
 
     const argumentsAfterCommand = withoutUnsafe.slice(1);
     const correlationId = dependencies.createCorrelationId ?? randomUUID;
-    const command = parseNamedCommand(rawName, argumentsAfterCommand, unsafeLocal, correlationId());
+    const command = parseNamedCommand(
+      rawName,
+      argumentsAfterCommand,
+      unsafeLocal,
+      correlationId(),
+    );
     return Object.freeze({ ok: true, command });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid command line";
-    const code = error instanceof Error && "code" in error && typeof error.code === "string"
-      ? error.code
-      : "invalid_input";
-    return Object.freeze({ ok: false, command: null, json: jsonRequested, outcome: invalidInputOutcome(message, code) });
+    const message =
+      error instanceof Error ? error.message : "invalid command line";
+    const code =
+      error instanceof Error &&
+      "code" in error &&
+      typeof error.code === "string"
+        ? error.code
+        : "invalid_input";
+    return Object.freeze({
+      ok: false,
+      command: null,
+      json: jsonRequested,
+      outcome: invalidInputOutcome(message, code),
+    });
   }
 }
 
@@ -159,64 +254,139 @@ function parseNamedCommand(
 ): Command {
   switch (name) {
     case "init": {
-      const parsed = parseArguments(values, new Set());
-      return freezeCommand({ name, correlationId, options: { slug: requiredSlug(parsed.positionals, name) } });
+      const parsed = parseArguments(values, new Set(["--json"]));
+      return freezeCommand({
+        name,
+        correlationId,
+        options: {
+          slug: requiredSlug(parsed.positionals, name),
+          json: parsed.flag("--json"),
+        },
+      });
     }
     case "test": {
-      const parsed = parseArguments(values, new Set(["--solution", "--case", "--json"]));
-      return freezeCommand({ name, correlationId, options: {
-        slug: requiredSlug(parsed.positionals, name),
-        solution: optionalPath(parsed.option("--solution"), "--solution"),
-        case: optionalPath(parsed.option("--case"), "--case"),
-        json: parsed.flag("--json"), unsafeLocal,
-      } });
+      const parsed = parseArguments(
+        values,
+        new Set(["--solution", "--case", "--jobs", "--json"]),
+      );
+      return freezeCommand({
+        name,
+        correlationId,
+        options: {
+          slug: requiredSlug(parsed.positionals, name),
+          solution: optionalPath(parsed.option("--solution"), "--solution"),
+          case: optionalPath(parsed.option("--case"), "--case"),
+          jobs: optionalPositiveInteger(parsed.option("--jobs"), "--jobs"),
+          json: parsed.flag("--json"),
+          unsafeLocal,
+        },
+      });
     }
     case "stress-test": {
-      const parsed = parseArguments(values, new Set(["--generator", "--naive", "--solution", "--seed", "--cases", "--duration", "--jobs", "--shrink", "--json"]));
-      return freezeCommand({ name, correlationId, options: {
-        slug: requiredSlug(parsed.positionals, name),
-        generator: optionalPath(parsed.option("--generator"), "--generator"),
-        naive: optionalPath(parsed.option("--naive"), "--naive"),
-        solution: optionalPath(parsed.option("--solution"), "--solution"),
-        seed: optionalUint64(parsed.option("--seed"), "--seed"),
-        cases: optionalPositiveInteger(parsed.option("--cases"), "--cases"),
-        duration: optionalPositiveInteger(parsed.option("--duration"), "--duration"),
-        jobs: optionalPositiveInteger(parsed.option("--jobs"), "--jobs"),
-        shrink: parsed.flag("--shrink"), json: parsed.flag("--json"), unsafeLocal,
-      } });
+      const parsed = parseArguments(
+        values,
+        new Set([
+          "--generator",
+          "--naive",
+          "--solution",
+          "--seed",
+          "--cases",
+          "--duration",
+          "--jobs",
+          "--shrink",
+          "--json",
+        ]),
+      );
+      return freezeCommand({
+        name,
+        correlationId,
+        options: {
+          slug: requiredSlug(parsed.positionals, name),
+          generator: optionalPath(parsed.option("--generator"), "--generator"),
+          naive: optionalPath(parsed.option("--naive"), "--naive"),
+          solution: optionalPath(parsed.option("--solution"), "--solution"),
+          seed: optionalUint64(parsed.option("--seed"), "--seed"),
+          cases: optionalPositiveInteger(parsed.option("--cases"), "--cases"),
+          duration: optionalPositiveInteger(
+            parsed.option("--duration"),
+            "--duration",
+          ),
+          jobs: optionalPositiveInteger(parsed.option("--jobs"), "--jobs"),
+          shrink: parsed.flag("--shrink"),
+          json: parsed.flag("--json"),
+          unsafeLocal,
+        },
+      });
     }
     case "watch": {
-      const parsed = parseArguments(values, new Set(["--solution", "--debounce", "--json"]));
-      return freezeCommand({ name, correlationId, options: {
-        slug: requiredSlug(parsed.positionals, name),
-        solution: optionalPath(parsed.option("--solution"), "--solution"),
-        debounce: optionalNonNegativeInteger(parsed.option("--debounce"), "--debounce"),
-        json: parsed.flag("--json"), unsafeLocal,
-      } });
+      const parsed = parseArguments(
+        values,
+        new Set(["--solution", "--debounce", "--jobs", "--json"]),
+      );
+      return freezeCommand({
+        name,
+        correlationId,
+        options: {
+          slug: requiredSlug(parsed.positionals, name),
+          solution: optionalPath(parsed.option("--solution"), "--solution"),
+          debounce: optionalNonNegativeInteger(
+            parsed.option("--debounce"),
+            "--debounce",
+          ),
+          jobs: optionalPositiveInteger(parsed.option("--jobs"), "--jobs"),
+          json: parsed.flag("--json"),
+          unsafeLocal,
+        },
+      });
     }
     case "benchmark": {
-      const parsed = parseArguments(values, new Set(["--solutions", "--cases", "--warmup", "--samples", "--json"]));
-      return freezeCommand({ name, correlationId, options: {
-        slug: requiredSlug(parsed.positionals, name),
-        solutions: parseSolutions(parsed.requiredOption("--solutions")),
-        cases: optionalPath(parsed.option("--cases"), "--cases"),
-        warmup: optionalNonNegativeInteger(parsed.option("--warmup"), "--warmup"),
-        samples: optionalPositiveInteger(parsed.option("--samples"), "--samples"),
-        json: parsed.flag("--json"), unsafeLocal,
-      } });
+      const parsed = parseArguments(
+        values,
+        new Set(["--solutions", "--cases", "--warmup", "--samples", "--json"]),
+      );
+      return freezeCommand({
+        name,
+        correlationId,
+        options: {
+          slug: requiredSlug(parsed.positionals, name),
+          solutions: parseSolutions(parsed.requiredOption("--solutions")),
+          cases: optionalPath(parsed.option("--cases"), "--cases"),
+          warmup: optionalNonNegativeInteger(
+            parsed.option("--warmup"),
+            "--warmup",
+          ),
+          samples: optionalPositiveInteger(
+            parsed.option("--samples"),
+            "--samples",
+          ),
+          json: parsed.flag("--json"),
+          unsafeLocal,
+        },
+      });
     }
     case "report": {
       const parsed = parseArguments(values, new Set(["--since", "--json"]));
-      return freezeCommand({ name, correlationId, options: {
-        slug: optionalSlug(parsed.positionals, name),
-        since: optionalDate(parsed.option("--since")), json: parsed.flag("--json"),
-      } });
+      return freezeCommand({
+        name,
+        correlationId,
+        options: {
+          slug: optionalSlug(parsed.positionals, name),
+          since: optionalDate(parsed.option("--since")),
+          json: parsed.flag("--json"),
+        },
+      });
     }
     case "replay": {
       const parsed = parseArguments(values, new Set(["--json"]));
-      return freezeCommand({ name, correlationId, options: {
-        artifactId: requiredText(parsed.positionals, "artifact-id"), json: parsed.flag("--json"), unsafeLocal,
-      } });
+      return freezeCommand({
+        name,
+        correlationId,
+        options: {
+          artifactId: requiredText(parsed.positionals, "artifact-id"),
+          json: parsed.flag("--json"),
+          unsafeLocal,
+        },
+      });
     }
   }
 }
@@ -226,19 +396,25 @@ class ParsedArguments {
     public readonly positionals: readonly string[],
     private readonly options: ReadonlyMap<string, string | true>,
   ) {}
-  public flag(name: string): boolean { return this.options.get(name) === true; }
+  public flag(name: string): boolean {
+    return this.options.get(name) === true;
+  }
   public option(name: string): string | undefined {
     const value = this.options.get(name);
     return typeof value === "string" ? value : undefined;
   }
   public requiredOption(name: string): string {
     const value = this.option(name);
-    if (value === undefined) throw invalidInput(`${name} is required`, "missing_option");
+    if (value === undefined)
+      throw invalidInput(`${name} is required`, "missing_option");
     return value;
   }
 }
 
-function parseArguments(values: readonly string[], allowed: ReadonlySet<string>): ParsedArguments {
+function parseArguments(
+  values: readonly string[],
+  allowed: ReadonlySet<string>,
+): ParsedArguments {
   const options = new Map<string, string | true>();
   const positionals: string[] = [];
   for (let index = 0; index < values.length; index += 1) {
@@ -247,8 +423,16 @@ function parseArguments(values: readonly string[], allowed: ReadonlySet<string>)
       positionals.push(value);
       continue;
     }
-    if (!allowed.has(value)) throw invalidInput(`unknown option ${JSON.stringify(value)}`, "unknown_option");
-    if (options.has(value)) throw invalidInput(`${value} may be supplied at most once`, "duplicate_option");
+    if (!allowed.has(value))
+      throw invalidInput(
+        `unknown option ${JSON.stringify(value)}`,
+        "unknown_option",
+      );
+    if (options.has(value))
+      throw invalidInput(
+        `${value} may be supplied at most once`,
+        "duplicate_option",
+      );
     if (value === "--json" || value === "--shrink") {
       options.set(value, true);
       continue;
@@ -263,72 +447,147 @@ function parseArguments(values: readonly string[], allowed: ReadonlySet<string>)
   return new ParsedArguments(Object.freeze(positionals), options);
 }
 
-function requiredSlug(positionals: readonly string[], name: CommandName): string {
-  if (positionals.length !== 1) throw invalidInput(`${name} requires exactly one <slug>`, "invalid_positional");
+function requiredSlug(
+  positionals: readonly string[],
+  name: CommandName,
+): string {
+  if (positionals.length !== 1)
+    throw invalidInput(
+      `${name} requires exactly one <slug>`,
+      "invalid_positional",
+    );
   const slug = positionals[0]!;
-  if (!isValidSlug(slug)) throw invalidInput(`invalid slug ${JSON.stringify(slug)}`, "invalid_slug");
+  if (!isValidSlug(slug))
+    throw invalidInput(`invalid slug ${JSON.stringify(slug)}`, "invalid_slug");
   return slug;
 }
-function optionalSlug(positionals: readonly string[], name: CommandName): string | undefined {
-  if (positionals.length > 1) throw invalidInput(`${name} accepts at most one <slug>`, "invalid_positional");
+function optionalSlug(
+  positionals: readonly string[],
+  name: CommandName,
+): string | undefined {
+  if (positionals.length > 1)
+    throw invalidInput(
+      `${name} accepts at most one <slug>`,
+      "invalid_positional",
+    );
   if (positionals.length === 0) return undefined;
   return requiredSlug(positionals, name);
 }
 function requiredText(positionals: readonly string[], label: string): string {
-  if (positionals.length !== 1) throw invalidInput(`replay requires exactly one <${label}>`, "invalid_positional");
+  if (positionals.length !== 1)
+    throw invalidInput(
+      `replay requires exactly one <${label}>`,
+      "invalid_positional",
+    );
   return requiredNonEmpty(positionals[0]!, label);
 }
-function optionalPath(value: string | undefined, label: string): string | undefined {
+function optionalPath(
+  value: string | undefined,
+  label: string,
+): string | undefined {
   return value === undefined ? undefined : requiredNonEmpty(value, label);
 }
 function requiredNonEmpty(value: string, label: string): string {
-  if (value.length === 0 || value.includes("\0")) throw invalidInput(`${label} must be non-empty and contain no NUL bytes`, "invalid_value");
+  if (value.length === 0 || value.includes("\0"))
+    throw invalidInput(
+      `${label} must be non-empty and contain no NUL bytes`,
+      "invalid_value",
+    );
   return value;
 }
-function optionalUint64(value: string | undefined, label: string): string | undefined {
+function optionalUint64(
+  value: string | undefined,
+  label: string,
+): string | undefined {
   if (value === undefined) return undefined;
-  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) throw invalidInput(`${label} must be an unsigned decimal uint64`, "invalid_number");
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(value))
+    throw invalidInput(
+      `${label} must be an unsigned decimal uint64`,
+      "invalid_number",
+    );
   const parsed = BigInt(value);
-  if (parsed > UINT64_MAX) throw invalidInput(`${label} exceeds uint64`, "number_out_of_range");
+  if (parsed > UINT64_MAX)
+    throw invalidInput(`${label} exceeds uint64`, "number_out_of_range");
   return parsed.toString(10);
 }
-function optionalPositiveInteger(value: string | undefined, label: string): number | undefined {
+function optionalPositiveInteger(
+  value: string | undefined,
+  label: string,
+): number | undefined {
   return optionalInteger(value, label, 1n);
 }
-function optionalNonNegativeInteger(value: string | undefined, label: string): number | undefined {
+function optionalNonNegativeInteger(
+  value: string | undefined,
+  label: string,
+): number | undefined {
   return optionalInteger(value, label, 0n);
 }
-function optionalInteger(value: string | undefined, label: string, minimum: bigint): number | undefined {
+function optionalInteger(
+  value: string | undefined,
+  label: string,
+  minimum: bigint,
+): number | undefined {
   if (value === undefined) return undefined;
-  if (!/^(?:0|[1-9][0-9]*)$/u.test(value)) throw invalidInput(`${label} must be a decimal integer`, "invalid_number");
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(value))
+    throw invalidInput(`${label} must be a decimal integer`, "invalid_number");
   const parsed = BigInt(value);
-  if (parsed < minimum || parsed > MAX_SAFE_INTEGER_TEXT) throw invalidInput(`${label} is outside the supported range`, "number_out_of_range");
+  if (parsed < minimum || parsed > MAX_SAFE_INTEGER_TEXT)
+    throw invalidInput(
+      `${label} is outside the supported range`,
+      "number_out_of_range",
+    );
   return Number(parsed);
 }
 function optionalDate(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) throw invalidInput("--since must use YYYY-MM-DD", "invalid_date");
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value))
+    throw invalidInput("--since must use YYYY-MM-DD", "invalid_date");
   const [yearText, monthText, dayText] = value.split("-");
-  const year = Number(yearText); const month = Number(monthText); const day = Number(dayText);
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
   const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) throw invalidInput("--since must be a real calendar date", "invalid_date");
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  )
+    throw invalidInput("--since must be a real calendar date", "invalid_date");
   return value;
 }
 function parseSolutions(value: string): readonly string[] {
   const solutions = value.split(",");
-  if (solutions.length < 2) throw invalidInput("--solutions requires at least two comma-separated paths", "invalid_solutions");
-  return Object.freeze(solutions.map((solution) => requiredNonEmpty(solution, "--solutions")));
+  if (solutions.length < 2)
+    throw invalidInput(
+      "--solutions requires at least two comma-separated paths",
+      "invalid_solutions",
+    );
+  return Object.freeze(
+    solutions.map((solution) => requiredNonEmpty(solution, "--solutions")),
+  );
 }
-function freezeCommand<CommandValue extends { readonly name: CommandName; readonly correlationId: string; readonly options: object }>(
-  command: CommandValue,
-): CommandValue {
+function freezeCommand<
+  CommandValue extends {
+    readonly name: CommandName;
+    readonly correlationId: string;
+    readonly options: object;
+  },
+>(command: CommandValue): CommandValue {
   // Preserve the exact object type selected by each switch branch. Constraining
   // this helper to the union would widen optional properties under
   // `exactOptionalPropertyTypes` before the branch is returned.
-  return Object.freeze({ ...command, options: Object.freeze(command.options) }) as CommandValue;
+  return Object.freeze({
+    ...command,
+    options: Object.freeze(command.options),
+  }) as CommandValue;
 }
-function indexesOf(values: readonly string[], value: string): readonly number[] {
-  return values.flatMap((candidate, index) => candidate === value ? [index] : []);
+function indexesOf(
+  values: readonly string[],
+  value: string,
+): readonly number[] {
+  return values.flatMap((candidate, index) =>
+    candidate === value ? [index] : [],
+  );
 }
 function isCommandName(value: string): value is CommandName {
   return (COMMAND_NAMES as readonly string[]).includes(value);
@@ -338,21 +597,39 @@ function isCommandName(value: string): value is CommandName {
 export type CommandHandler<CommandValue extends Command = Command> = (
   command: CommandValue,
 ) => Promise<CliOutcome> | CliOutcome;
-export type CommandHandlers = Readonly<{ [Name in CommandName]: CommandHandler<Extract<Command, { readonly name: Name }>> }>;
+export type CommandHandlers = Readonly<{
+  [Name in CommandName]: CommandHandler<
+    Extract<Command, { readonly name: Name }>
+  >;
+}>;
 
 /** Dispatch via the composition-supplied handler registry. */
-export function dispatchCommand(command: Command, handlers: CommandHandlers): Promise<CliOutcome> {
+export function dispatchCommand(
+  command: Command,
+  handlers: CommandHandlers,
+): Promise<CliOutcome> {
   return Promise.resolve(handlers[command.name](command as never));
 }
 
 /** Default task-11 facade: commands are parsed but cannot claim implementation success. */
 export function createDeferredCommandHandlers(): CommandHandlers {
-  const deferred: CommandHandler = () => outcome("internal_error", null, [{ code: "command_deferred", message: "command implementation is not installed" }]);
-  return Object.freeze({ init: deferred, test: deferred, "stress-test": deferred, watch: deferred, benchmark: deferred, report: deferred, replay: deferred });
+  const deferred: CommandHandler = () =>
+    outcome("internal_error", null, [
+      {
+        code: "command_deferred",
+        message: "command implementation is not installed",
+      },
+    ]);
+  return Object.freeze({
+    init: deferred,
+    test: deferred,
+    "stress-test": deferred,
+    watch: deferred,
+    benchmark: deferred,
+    report: deferred,
+    replay: deferred,
+  });
 }
-
-/** Compile-time guard for handler result values crossing the JSON boundary. */
-export type CommandResult = JsonValue;
 
 export { COMMAND_NAMES } from "./types.js";
 export type { CommandName } from "./types.js";

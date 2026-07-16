@@ -46,11 +46,22 @@ describe("schema application", () => {
     expect(Number(version?.["user_version"])).toBe(SCHEMA_VERSION);
   });
 
+  it("includes benchmark plan provenance on runs", () => {
+    const columns = raw.db.prepare("PRAGMA table_info(run)").all();
+    expect(columns.map((column) => column["name"])).toContain(
+      "benchmark_plan_sha256",
+    );
+  });
+
   it("enforces UNIQUE(case_id, implementation_id) on execution", () => {
     seedGraphOn(raw.db);
     insertObject(raw.db, "execution", makeExecution());
     expect(() =>
-      insertObject(raw.db, "execution", makeExecution({ execution_id: "exec-0002" })),
+      insertObject(
+        raw.db,
+        "execution",
+        makeExecution({ execution_id: "exec-0002" }),
+      ),
     ).toThrow();
   });
 
@@ -58,7 +69,11 @@ describe("schema application", () => {
     seedGraphOn(raw.db);
     insertObject(raw.db, "benchmark_sample", makeSample());
     expect(() =>
-      insertObject(raw.db, "benchmark_sample", makeSample({ sample_id: "sample-0002" })),
+      insertObject(
+        raw.db,
+        "benchmark_sample",
+        makeSample({ sample_id: "sample-0002" }),
+      ),
     ).toThrow();
   });
 
@@ -84,7 +99,9 @@ describe("schema application", () => {
 
   it("cascades deletes from run to its child cases", () => {
     seedGraphOn(raw.db);
-    raw.db.prepare("DELETE FROM run WHERE run_id = :id").run({ id: "run-0001" });
+    raw.db
+      .prepare("DELETE FROM run WHERE run_id = :id")
+      .run({ id: "run-0001" });
     const cases = raw.db.prepare('SELECT COUNT(*) AS n FROM "case"').get();
     expect(Number(cases?.["n"])).toBe(0);
   });
@@ -92,7 +109,9 @@ describe("schema application", () => {
   it("restricts deleting a problem still referenced by an implementation", () => {
     seedGraphOn(raw.db);
     expect(() =>
-      raw.db.prepare("DELETE FROM problem WHERE problem_id = :id").run({ id: "prob-0001" }),
+      raw.db
+        .prepare("DELETE FROM problem WHERE problem_id = :id")
+        .run({ id: "prob-0001" }),
     ).toThrow();
   });
 });

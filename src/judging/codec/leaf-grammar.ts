@@ -68,7 +68,10 @@ const BASE64URL_DECODE: Readonly<Record<string, number>> = (() => {
  * @param negativeZero - Whether this float represents negative zero.
  * @returns `true` iff `value` is a canonical finite float under the flag.
  */
-export function isCanonicalFloat(value: string, negativeZero: boolean): boolean {
+export function isCanonicalFloat(
+  value: string,
+  negativeZero: boolean,
+): boolean {
   const match = /^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?(e[+-][1-9][0-9]*)?$/.exec(
     value,
   );
@@ -297,7 +300,11 @@ export function isValidTimeOfDay(value: string): boolean {
   const hourStr = match[1];
   const minuteStr = match[2];
   const secondStr = match[3];
-  if (hourStr === undefined || minuteStr === undefined || secondStr === undefined) {
+  if (
+    hourStr === undefined ||
+    minuteStr === undefined ||
+    secondStr === undefined
+  ) {
     return false;
   }
   const hour = Number(hourStr);

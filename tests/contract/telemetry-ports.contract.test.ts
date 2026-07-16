@@ -8,13 +8,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { Clock } from "../../src/execution/ports/index.js";
+import type { Clock } from "../../src/execution/clock.js";
 import {
-  SafeTelemetryPublisher,
+  publishSafely,
   TelemetryEventFactory,
   type TelemetryEvent,
 } from "../../src/telemetry/index.js";
-import type { TelemetrySink } from "../../src/telemetry/ports/index.js";
+import type { TelemetrySink } from "../../src/telemetry/ports/sink.js";
 
 // Retain the type-only import and verify the port surface exists.
 type _PortSurface = [TelemetrySink<TelemetryEvent>];
@@ -40,7 +40,9 @@ function makeEvent(event = "command.started"): TelemetryEvent {
 describe("TelemetrySink contract", () => {
   it("emit() accepts a well-formed event envelope", () => {
     const events: TelemetryEvent[] = [];
-    const sink: TelemetrySink<TelemetryEvent> = { emit: (event) => events.push(event) };
+    const sink: TelemetrySink<TelemetryEvent> = {
+      emit: (event) => events.push(event),
+    };
     sink.emit(makeEvent());
     expect(events).toHaveLength(1);
     expect(events[0]?.schemaVersion).toBe(1);
@@ -48,21 +50,23 @@ describe("TelemetrySink contract", () => {
 
   it("emit() is fire-and-forget: a sink failure never alters a verdict", () => {
     const sink: TelemetrySink<TelemetryEvent> = {
-      emit: () => { throw new Error("unavailable"); },
+      emit: () => {
+        throw new Error("unavailable");
+      },
     };
-    const publisher = new SafeTelemetryPublisher([sink]);
     let verdict = "passed";
-    publisher.emit(makeEvent());
+    publishSafely([sink], makeEvent());
     verdict = "passed";
     expect(verdict).toBe("passed");
   });
 
   it("emit() delivers events in the order the orchestrator submits them", () => {
     const names: string[] = [];
-    const sink: TelemetrySink<TelemetryEvent> = { emit: (event) => names.push(event.event) };
-    const publisher = new SafeTelemetryPublisher([sink]);
-    publisher.emit(makeEvent("command.started"));
-    publisher.emit(makeEvent("command.finished"));
+    const sink: TelemetrySink<TelemetryEvent> = {
+      emit: (event) => names.push(event.event),
+    };
+    publishSafely([sink], makeEvent("command.started"));
+    publishSafely([sink], makeEvent("command.finished"));
     expect(names).toEqual(["command.started", "command.finished"]);
   });
 });

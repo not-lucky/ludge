@@ -2,29 +2,27 @@
 /**
  * dependency-cruiser configuration for Palestra Judge.
  *
- * This file is the machine-checked encoding of the layered dependency direction
- * from `docs/architecture/system.md` and `docs/architecture/design-patterns.md`:
+ * This file enforces the dependency direction of the current source tree:
  *
  *   cli -> application -> domain
- *                    -> ports <- adapters
- *   infrastructure -> ports and adapters
+ *   infrastructure / execution / persistence -> domain
  *
- * The core invariant is that `domain` is pure: it MUST NOT import any adapter,
- * the CLI, a Node process API, the SQLite driver, or any Python-specific module.
- * Adapters point inward to ports and domain; the composition root in `cli` is the
- * only place allowed to reach across the whole graph to select concrete factories.
+ * The core invariant is that `domain` is pure: it MUST NOT import the CLI,
+ * application, runtime adapters, Node process APIs, or npm packages. The CLI is
+ * the composition root; implementation domains must not depend on it or on
+ * application commands.
  *
  * Path conventions (regex against POSIX-style module paths):
- *   src/domain/          pure contracts
- *   src/application/     use cases / orchestration
- *   src/cli/             command parsing + composition root
- *   src/execution/...    ports + runtime/sandbox adapters
- *   src/judging/         codecs, comparators, fuzzing
- *   src/watch/           watch scheduler policy
+ *   src/domain/          pure contracts and state
+ *   src/application/     command orchestration
+ *   src/cli/             parsing, composition, and process lifecycle
+ *   src/execution/       runner, sandbox, and host seams
+ *   src/judging/         codecs and comparators
+ *   src/watch/           watch scheduling policy
  *   src/benchmark/       benchmark policy
- *   src/persistence/     repository ports + SQLite adapter
- *   src/telemetry/       telemetry ports + adapters
- *   src/infrastructure/  config, IDs, hashing, filesystem, clock
+ *   src/persistence/     SQLite storage and transaction ownership
+ *   src/telemetry/       event publishing and rendering
+ *   src/infrastructure/  problem parsing and Node filesystem binding
  */
 
 /** @type {import('dependency-cruiser').IConfiguration} */
@@ -42,8 +40,8 @@ module.exports = {
     {
       name: "domain-is-pure",
       comment:
-        "domain MUST import only domain. No adapter, CLI, application, port, " +
-        "or infrastructure module may leak into the pure contract layer.",
+        "domain MUST import only domain. No CLI, application, runtime, or " +
+        "infrastructure module may leak into the pure contract layer.",
       severity: "error",
       from: { path: "^src/domain/" },
       to: {
@@ -78,24 +76,12 @@ module.exports = {
       from: { path: "^src/application/" },
       to: { path: "^src/cli/" },
     },
-    {
-      name: "application-no-adapters",
-      comment:
-        "application depends on ports, never on concrete adapter internals. " +
-        "Concrete selection happens only at the composition root in cli.",
-      severity: "error",
-      from: { path: "^src/application/" },
-      to: {
-        path: "^src/(execution/(runtimes|sandbox)|persistence/sqlite|telemetry/adapters)/",
-      },
-    },
 
-    // --- adapters point inward ----------------------------------------------
+    // --- implementation domains do not call command layers -----------------
     {
-      name: "adapters-no-cli-or-application",
+      name: "implementation-no-cli-or-application",
       comment:
-        "Adapters implement ports and point inward to ports + domain. They MUST " +
-        "NOT import the CLI or application use cases.",
+        "Implementation domains MUST NOT import the CLI or application use cases.",
       severity: "error",
       from: {
         path: "^src/(execution|judging|watch|benchmark|persistence|telemetry|infrastructure)/",
@@ -103,39 +89,31 @@ module.exports = {
       to: { path: "^src/(cli|application)/" },
     },
 
-    // --- sibling policies stay independent ----------------------------------
+    // --- active sibling policies stay independent ---------------------------
     {
-      name: "watch-not-benchmark-or-fuzz",
+      name: "watch-not-benchmark",
       comment:
-        "watch policy MUST NOT import benchmark or fuzzing concretes; siblings " +
-        "share only domain + ports.",
+        "watch policy MUST NOT import benchmark policy; the command layer " +
+        "coordinates both when needed.",
       severity: "error",
       from: { path: "^src/watch/" },
-      to: { path: "^src/(benchmark/|judging/fuzzing/)" },
+      to: { path: "^src/benchmark/" },
     },
     {
-      name: "benchmark-not-watch-or-fuzz",
+      name: "benchmark-not-watch",
       comment:
-        "benchmark policy MUST NOT import watch or fuzzing concretes; siblings " +
-        "share only domain + ports.",
+        "benchmark policy MUST NOT import watch policy; the command layer " +
+        "coordinates both when needed.",
       severity: "error",
       from: { path: "^src/benchmark/" },
-      to: { path: "^src/(watch/|judging/fuzzing/)" },
-    },
-    {
-      name: "fuzzing-not-watch-or-benchmark",
-      comment:
-        "fuzzing policy MUST NOT import watch or benchmark concretes; siblings " +
-        "share only domain + ports.",
-      severity: "error",
-      from: { path: "^src/judging/fuzzing/" },
-      to: { path: "^src/(watch/|benchmark/)" },
+      to: { path: "^src/watch/" },
     },
 
     // --- hygiene -------------------------------------------------------------
     {
       name: "no-orphans",
-      comment: "Unreferenced modules are dead weight; wire them in or remove them.",
+      comment:
+        "Unreferenced modules are dead weight; wire them in or remove them.",
       severity: "warn",
       from: {
         orphan: true,

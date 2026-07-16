@@ -11,7 +11,12 @@
  * This is an adapter module; it imports the driver only as a type.
  */
 
-import type { SqlParams, SqlValue, SqliteConnection, SqliteRow } from "./connection.js";
+import type {
+  SqlParams,
+  SqlValue,
+  SqliteConnection,
+  SqliteRow,
+} from "./connection.js";
 import {
   bigIntCol,
   boolCol,

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { BoundedCollector } from "../../../src/execution/sandbox/linux/output-collector.js";
+import { BoundedCollector } from "../../../src/execution/output-collector.js";
 
 /** Build a byte chunk of `length` filled with a repeating marker byte. */
 function chunk(length: number, fill = 0x61): Uint8Array {

@@ -1,0 +1,8 @@
+schemaVersion: 1
+slug: two-sum
+title: Two Sum
+entrypoint: solution.py
+limits: {}
+casesDir: cases
+args: ["list[int]", int]
+returns: "list[int]"

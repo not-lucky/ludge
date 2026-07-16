@@ -17,14 +17,6 @@ export {
   toRunId,
 } from "./ids.js";
 
-// Domain errors.
-export {
-  DomainError,
-  IllegalRunTransitionError,
-  IllegalWatchTransitionError,
-  StaleGenerationError,
-} from "./errors.js";
-
 // Execution statuses and precedence.
 export type { ExecutionStatus, TerminationCause } from "./status.js";
 export {
@@ -64,11 +56,5 @@ export type {
   PersistableRun,
   RunQuery,
   RunState,
-  SettledOutcome,
   TerminalRunState,
 } from "./run.js";
-export { RUN_TRANSITIONS, RunLifecycle } from "./run.js";
-
-// Watch lifecycle.
-export type { WatchState } from "./watch.js";
-export { WATCH_TRANSITIONS, WatchLifecycle } from "./watch.js";

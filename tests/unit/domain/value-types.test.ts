@@ -91,23 +91,18 @@ describe("createResourceLimits", () => {
     ),
   );
 
-  it.each(cases)(
-    "rejects field '%s' when it is %s",
-    (field, _label, value) => {
-      const spec = { ...validSpec(), [field]: value };
-      let thrown: unknown;
-      try {
-        createResourceLimits(spec);
-      } catch (err) {
-        thrown = err;
-      }
-      expect(thrown).toBeInstanceOf(RangeError);
-      // The message must name the offending field.
-      expect((thrown as RangeError).message).toMatch(
-        new RegExp(`'${field}'`),
-      );
-    },
-  );
+  it.each(cases)("rejects field '%s' when it is %s", (field, _label, value) => {
+    const spec = { ...validSpec(), [field]: value };
+    let thrown: unknown;
+    try {
+      createResourceLimits(spec);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(RangeError);
+    // The message must name the offending field.
+    expect((thrown as RangeError).message).toMatch(new RegExp(`'${field}'`));
+  });
 });
 
 describe("toRunId / toCaseId", () => {

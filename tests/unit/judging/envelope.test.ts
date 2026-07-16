@@ -109,9 +109,9 @@ describe("response round-trip", () => {
 
 describe("framing rejections", () => {
   it("rejects more than one line", () => {
-    expect(decodeRequestLine(bytes(`${VALID_REQUEST}\n${VALID_REQUEST}`)).ok).toBe(
-      false,
-    );
+    expect(
+      decodeRequestLine(bytes(`${VALID_REQUEST}\n${VALID_REQUEST}`)).ok,
+    ).toBe(false);
   });
 
   it("rejects an empty line", () => {
@@ -124,7 +124,10 @@ describe("framing rejections", () => {
   });
 
   it("rejects a duplicate field", () => {
-    const line = VALID_REQUEST.replace('"runId":"r1",', '"runId":"r1","runId":"r1",');
+    const line = VALID_REQUEST.replace(
+      '"runId":"r1",',
+      '"runId":"r1","runId":"r1",',
+    );
     expect(decodeRequestLine(bytes(line)).ok).toBe(false);
   });
 
@@ -134,7 +137,10 @@ describe("framing rejections", () => {
   });
 
   it("rejects an unsupported protocolVersion", () => {
-    const line = VALID_REQUEST.replace('"protocolVersion":1', '"protocolVersion":2');
+    const line = VALID_REQUEST.replace(
+      '"protocolVersion":1',
+      '"protocolVersion":2',
+    );
     expect(decodeRequestLine(bytes(line)).ok).toBe(false);
   });
 

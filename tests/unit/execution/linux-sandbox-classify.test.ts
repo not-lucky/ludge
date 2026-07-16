@@ -13,7 +13,7 @@ import type {
   RawProcessResult,
   ResourceLimits,
 } from "../../../src/domain/index.js";
-import { classifyTermination } from "../../../src/execution/sandbox/linux/index.js";
+import { classifyTermination } from "../../../src/execution/classify.js";
 
 const LIMITS: ResourceLimits = createResourceLimits({
   wallTimeMs: 2000,
@@ -73,7 +73,11 @@ describe("classifyTermination", () => {
   it("classifies a wall-deadline kill as tle_wall", () => {
     expect(
       classifyTermination(
-        makeRaw({ termination: "timed_out", exitCode: null, signal: "SIGKILL" }),
+        makeRaw({
+          termination: "timed_out",
+          exitCode: null,
+          signal: "SIGKILL",
+        }),
         LIMITS,
       ),
     ).toBe("tle_wall");

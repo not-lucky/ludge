@@ -5,13 +5,12 @@
  * its writer connection and therefore to the enclosing transaction.
  */
 
-import type { CaseWriter } from "../../ports/index.js";
 import type { SqliteConnection } from "../connection.js";
 import { insertObject } from "../row-io.js";
-import type { CaseRow, SqlitePersistenceRecords } from "../rows.js";
+import type { CaseRow } from "../rows.js";
 
 /** Writes case rows through one SQLite transaction connection. */
-export class SqliteCaseRepository implements CaseWriter<SqlitePersistenceRecords> {
+export class SqliteCaseRepository {
   public constructor(private readonly db: SqliteConnection) {}
 
   /** Commit a case row. Durable only when the transaction commits. */

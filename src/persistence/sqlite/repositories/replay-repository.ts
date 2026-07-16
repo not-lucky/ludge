@@ -14,7 +14,11 @@ export class SqliteReplayRepository {
   public constructor(private readonly db: SqliteConnection) {}
 
   public commit(link: ReplayLinkRow): Promise<void> {
-    this.db.prepare("INSERT INTO replay (replay_run_id, source_artifact_id, created_at) VALUES (:replay_run_id, :source_artifact_id, :created_at)").run({ ...link });
+    this.db
+      .prepare(
+        "INSERT INTO replay (replay_run_id, source_artifact_id, created_at) VALUES (:replay_run_id, :source_artifact_id, :created_at)",
+      )
+      .run({ ...link });
     return Promise.resolve();
   }
 }

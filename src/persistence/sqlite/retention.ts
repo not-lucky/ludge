@@ -68,7 +68,9 @@ export function applyRetention(
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    const executionsPruned = db.prepare(pruneExecutions).run({ cutoff }).changes;
+    const executionsPruned = db
+      .prepare(pruneExecutions)
+      .run({ cutoff }).changes;
     const samplesPruned = db.prepare(pruneSamples).run({ cutoff }).changes;
     db.exec("COMMIT");
     return { executionsPruned, samplesPruned, cutoff };

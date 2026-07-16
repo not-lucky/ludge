@@ -64,11 +64,19 @@ describe("runStartupRecovery", () => {
     insertObject(raw.db, "problem", makeProblem());
     insertObject(raw.db, "implementation", makeImplementation());
     insertRun(raw, "run-active", "running");
-    insertObject(raw.db, "case", makeCase({ case_id: "case-active", run_id: "run-active" }));
+    insertObject(
+      raw.db,
+      "case",
+      makeCase({ case_id: "case-active", run_id: "run-active" }),
+    );
     insertObject(
       raw.db,
       "execution",
-      makeExecution({ execution_id: "exec-active", case_id: "case-active", status: "running" }),
+      makeExecution({
+        execution_id: "exec-active",
+        case_id: "case-active",
+        status: "running",
+      }),
     );
 
     const report = runStartupRecovery(raw.db);
@@ -100,7 +108,9 @@ describe("runStartupRecovery", () => {
 
     runStartupRecovery(raw.db);
 
-    const artifacts = raw.db.prepare("SELECT COUNT(*) AS n FROM artifact").get();
+    const artifacts = raw.db
+      .prepare("SELECT COUNT(*) AS n FROM artifact")
+      .get();
     expect(Number(artifacts?.["n"])).toBe(1);
   });
 

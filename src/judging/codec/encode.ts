@@ -14,11 +14,7 @@
  * {@link CodecEncodeError} rather than emitting malformed bytes.
  */
 
-import type {
-  CanonicalValue,
-  DictEntry,
-  NumericLeaf,
-} from "../value/model.js";
+import type { CanonicalValue, DictEntry, NumericLeaf } from "../value/model.js";
 import { Budget, LimitExceededError } from "./limits.js";
 import { CodecEncodeError } from "./errors.js";
 import {
@@ -89,16 +85,25 @@ function encodeNode(
     case "null":
       return '{"tag":"null"}';
     case "bool":
-      return obj([["tag", '"bool"'], ["value", value.value ? "true" : "false"]]);
+      return obj([
+        ["tag", '"bool"'],
+        ["value", value.value ? "true" : "false"],
+      ]);
     case "int":
-      return obj([["tag", '"int"'], ["value", encodeInt(value.value)]]);
+      return obj([
+        ["tag", '"int"'],
+        ["value", encodeInt(value.value)],
+      ]);
     case "float":
       return encodeFloat(value.value, value.negativeZero, path);
     case "decimal":
       if (!isValidDecimalLiteral(value.value)) {
         throw new CodecEncodeError("invalid decimal literal", path);
       }
-      return obj([["tag", '"decimal"'], ["value", jsonString(value.value)]]);
+      return obj([
+        ["tag", '"decimal"'],
+        ["value", jsonString(value.value)],
+      ]);
     case "complex":
       return obj([
         ["imag", encodeLeaf(value.imag, budget, seen, `${path}.imag`)],
@@ -106,7 +111,10 @@ function encodeNode(
         ["tag", '"complex"'],
       ]);
     case "str":
-      return obj([["tag", '"str"'], ["value", encodeStr(value.value, path)]]);
+      return obj([
+        ["tag", '"str"'],
+        ["value", encodeStr(value.value, path)],
+      ]);
     case "list":
     case "tuple":
       return encodeSequence(value.tag, value.items, budget, seen, path);
@@ -121,7 +129,10 @@ function encodeNode(
       if (!isValidDate(value.value)) {
         throw new CodecEncodeError("invalid date", path);
       }
-      return obj([["tag", '"date"'], ["value", jsonString(value.value)]]);
+      return obj([
+        ["tag", '"date"'],
+        ["value", jsonString(value.value)],
+      ]);
     case "time":
       return encodeTime(value.value, value.offsetMinutes, value.fold, path);
     case "datetime":
@@ -130,7 +141,10 @@ function encodeNode(
       if (!isValidUuid(value.value)) {
         throw new CodecEncodeError("invalid uuid", path);
       }
-      return obj([["tag", '"uuid"'], ["value", jsonString(value.value)]]);
+      return obj([
+        ["tag", '"uuid"'],
+        ["value", jsonString(value.value)],
+      ]);
     case "path":
       if (!isCanonicalRelativePath(value.value, value.flavor)) {
         throw new CodecEncodeError("invalid or absolute path", path);
@@ -184,7 +198,11 @@ function encodeInt(value: bigint): string {
 }
 
 /** Validate and emit a canonical float object. */
-function encodeFloat(value: string, negativeZero: boolean, path: string): string {
+function encodeFloat(
+  value: string,
+  negativeZero: boolean,
+  path: string,
+): string {
   if (!isCanonicalFloat(value, negativeZero)) {
     throw new CodecEncodeError("non-canonical or non-finite float", path);
   }
@@ -217,7 +235,10 @@ function encodeSequence(
       encodeNode(item, budget, seen, `${path}.items[${i}]`),
     );
     budget.leave();
-    return obj([["items", `[${parts.join(",")}]`], ["tag", jsonString(tag)]]);
+    return obj([
+      ["items", `[${parts.join(",")}]`],
+      ["tag", jsonString(tag)],
+    ]);
   });
 }
 
@@ -241,7 +262,10 @@ function encodeSet(
         throw new CodecEncodeError(`duplicate ${tag} member`, path);
       }
     }
-    return obj([["items", `[${encoded.join(",")}]`], ["tag", jsonString(tag)]]);
+    return obj([
+      ["items", `[${encoded.join(",")}]`],
+      ["tag", jsonString(tag)],
+    ]);
   });
 }
 
@@ -255,21 +279,36 @@ function encodeDict(
   return withContainer({ tag: "dict", entries } as object, seen, path, () => {
     budget.enter();
     const encoded = entries.map((entry, i) => {
-      const key = encodeNode(entry.key, budget, seen, `${path}.entries[${i}].key`);
+      const key = encodeNode(
+        entry.key,
+        budget,
+        seen,
+        `${path}.entries[${i}].key`,
+      );
       const val = encodeNode(
         entry.value,
         budget,
         seen,
         `${path}.entries[${i}].value`,
       );
-      return { key, entry: obj([["key", key], ["value", val]]) };
+      return {
+        key,
+        entry: obj([
+          ["key", key],
+          ["value", val],
+        ]),
+      };
     });
     budget.leave();
     encoded.sort((a, b) => compareUtf8(a.key, b.key));
     for (let i = 1; i < encoded.length; i += 1) {
       const prev = encoded[i - 1];
       const cur = encoded[i];
-      if (prev !== undefined && cur !== undefined && compareUtf8(prev.key, cur.key) === 0) {
+      if (
+        prev !== undefined &&
+        cur !== undefined &&
+        compareUtf8(prev.key, cur.key) === 0
+      ) {
         throw new CodecEncodeError("duplicate dict key", path);
       }
     }
@@ -360,7 +399,10 @@ function encodeRecord(
       seenNames.add(field.name);
       return obj([
         ["name", encodeStr(field.name, `${path}.fields[${i}].name`)],
-        ["value", encodeNode(field.value, budget, seen, `${path}.fields[${i}].value`)],
+        [
+          "value",
+          encodeNode(field.value, budget, seen, `${path}.fields[${i}].value`),
+        ],
       ]);
     });
     budget.leave();
@@ -417,7 +459,10 @@ function encodeListNode(
       }
     }
     return obj([
-      ["cycleIndex", value.cycleIndex === null ? "null" : String(value.cycleIndex)],
+      [
+        "cycleIndex",
+        value.cycleIndex === null ? "null" : String(value.cycleIndex),
+      ],
       ["tag", '"ListNode"'],
       ["values", `[${values.join(",")}]`],
     ]);
@@ -452,10 +497,15 @@ function encodeTreeNode(
     }
     budget.enter();
     const parts = slots.map((slot, i) =>
-      slot === null ? "null" : encodeNode(slot, budget, seen, `${path}.values[${i}]`),
+      slot === null
+        ? "null"
+        : encodeNode(slot, budget, seen, `${path}.values[${i}]`),
     );
     budget.leave();
-    return obj([["tag", '"TreeNode"'], ["values", `[${parts.join(",")}]`]]);
+    return obj([
+      ["tag", '"TreeNode"'],
+      ["values", `[${parts.join(",")}]`],
+    ]);
   });
 }
 
@@ -482,7 +532,12 @@ function encodeClassTrace(
       if (op.expected !== undefined) {
         pairs.push([
           "expected",
-          encodeNode(op.expected, budget, seen, `${path}.operations[${i}].expected`),
+          encodeNode(
+            op.expected,
+            budget,
+            seen,
+            `${path}.operations[${i}].expected`,
+          ),
         ]);
       }
       return obj(pairs);
@@ -520,9 +575,7 @@ function withContainer(
  * UTF-8 lexical order. The value strings are already-encoded JSON fragments.
  */
 function obj(pairs: readonly (readonly [string, string])[]): string {
-  const sorted = pairs
-    .slice()
-    .sort((a, b) => compareUtf8(a[0], b[0]));
+  const sorted = pairs.slice().sort((a, b) => compareUtf8(a[0], b[0]));
   return `{${sorted.map(([k, v]) => `${jsonString(k)}:${v}`).join(",")}}`;
 }
 

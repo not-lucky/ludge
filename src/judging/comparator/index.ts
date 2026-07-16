@@ -14,7 +14,7 @@
  */
 
 import type { CanonicalValue } from "./../value/model.js";
-import type { OutputComparator } from "../ports/index.js";
+import type { ComparisonPolicy } from "../../domain/comparison.js";
 import { compareExactV1 } from "./exact-v1.js";
 import { UnsupportedComparisonPolicyError } from "./errors.js";
 import {
@@ -23,18 +23,15 @@ import {
   parsePolicyVersion,
 } from "./version.js";
 
-/**
- * Create the version-dispatching {@link OutputComparator}.
- *
- * The comparator inspects `policy.version` on each call and throws
- * {@link UnsupportedComparisonPolicyError} for any unrecognized or
- * unsupported-major version; supported minors are accepted and migrated.
- *
- * @returns An output comparator over {@link CanonicalValue}.
- */
-export function createOutputComparator(): OutputComparator<CanonicalValue> {
+export const EXACT_V1_VERSION = "exact-v1";
+
+export function createOutputComparator() {
   return {
-    compare(expected, actual, policy) {
+    compare(
+      expected: CanonicalValue,
+      actual: CanonicalValue,
+      policy: ComparisonPolicy,
+    ) {
       const parsed = parsePolicyVersion(policy.version);
       if (
         parsed === null ||
@@ -48,18 +45,11 @@ export function createOutputComparator(): OutputComparator<CanonicalValue> {
   };
 }
 
-// Concrete policy factory and its comparison function.
 export { compareExactV1, createExactV1Comparator } from "./exact-v1.js";
-
-// Version helpers.
 export {
   EXACT_FAMILY,
-  EXACT_V1_VERSION,
   SUPPORTED_POLICY_MAJOR,
   isSupportedPolicyVersion,
   parsePolicyVersion,
 } from "./version.js";
-export type { PolicyVersion } from "./version.js";
-
-// Error type.
 export { UnsupportedComparisonPolicyError } from "./errors.js";

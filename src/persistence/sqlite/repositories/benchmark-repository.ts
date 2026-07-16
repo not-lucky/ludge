@@ -11,19 +11,12 @@
  */
 
 import type { RunId } from "../../../domain/index.js";
-import type { BenchmarkRepository } from "../../ports/index.js";
 import type { SqliteConnection } from "../connection.js";
 import { insertObject, readAggregateRow, readSampleRow } from "../row-io.js";
-import type {
-  BenchmarkAggregateRow,
-  BenchmarkSampleRow,
-  SqlitePersistenceRecords,
-} from "../rows.js";
+import type { BenchmarkAggregateRow, BenchmarkSampleRow } from "../rows.js";
 
 /** A {@link BenchmarkRepository} backed by a single SQLite connection. */
-export class SqliteBenchmarkRepository
-  implements BenchmarkRepository<SqlitePersistenceRecords>
-{
+export class SqliteBenchmarkRepository {
   /**
    * @param db - The bound connection (writer inside a transaction, else reader).
    */

@@ -242,7 +242,10 @@ function strOf(node: JsonNode, path: string): string {
     throw new CanonicalValidationError("expected a string", path);
   }
   if (hasLoneSurrogate(node.value)) {
-    throw new CanonicalValidationError("string contains a lone surrogate", path);
+    throw new CanonicalValidationError(
+      "string contains a lone surrogate",
+      path,
+    );
   }
   return node.value;
 }
@@ -323,7 +326,9 @@ function buildItems(
 ): CanonicalValue[] {
   const items = arrOf(node, path);
   budget.enter();
-  const built = items.map((item, i) => build(item, budget, `${path}.items[${i}]`));
+  const built = items.map((item, i) =>
+    build(item, budget, `${path}.items[${i}]`),
+  );
   budget.leave();
   return built;
 }
@@ -360,7 +365,11 @@ function buildDict(
     const entry = asObject(entryNode, `${path}.entries[${i}]`);
     fields(entry, `${path}.entries[${i}]`, ["key", "value"]);
     return {
-      key: build(req(entry, "key", `${path}.entries[${i}]`), budget, `${path}.entries[${i}].key`),
+      key: build(
+        req(entry, "key", `${path}.entries[${i}]`),
+        budget,
+        `${path}.entries[${i}].key`,
+      ),
       value: build(
         req(entry, "value", `${path}.entries[${i}]`),
         budget,
@@ -490,12 +499,19 @@ function buildRecord(
     fields(field, fieldPath, ["name", "value"]);
     const fieldName = strOf(req(field, "name", fieldPath), fieldPath);
     if (seen.has(fieldName)) {
-      throw new CanonicalValidationError("duplicate record field name", fieldPath);
+      throw new CanonicalValidationError(
+        "duplicate record field name",
+        fieldPath,
+      );
     }
     seen.add(fieldName);
     return {
       name: fieldName,
-      value: build(req(field, "value", fieldPath), budget, `${fieldPath}.value`),
+      value: build(
+        req(field, "value", fieldPath),
+        budget,
+        `${fieldPath}.value`,
+      ),
     };
   });
   budget.leave();
@@ -553,7 +569,10 @@ function buildTreeNode(
 ): CanonicalValue {
   fields(members, path, ["tag", "values"]);
   const rawValues = arrOf(req(members, "values", path), path);
-  if (rawValues.length > 0 && rawValues[rawValues.length - 1]?.kind === "null") {
+  if (
+    rawValues.length > 0 &&
+    rawValues[rawValues.length - 1]?.kind === "null"
+  ) {
     throw new CanonicalValidationError(
       "TreeNode has trailing nulls (non-canonical)",
       path,
@@ -640,12 +659,18 @@ function offsetOf(
 ): number | null {
   if (node.kind === "null") {
     if (!nullable) {
-      throw new CanonicalValidationError("offsetMinutes must not be null", path);
+      throw new CanonicalValidationError(
+        "offsetMinutes must not be null",
+        path,
+      );
     }
     return null;
   }
   if (node.kind !== "number" || !isCanonicalIntString(node.raw)) {
-    throw new CanonicalValidationError("offsetMinutes must be an integer", path);
+    throw new CanonicalValidationError(
+      "offsetMinutes must be an integer",
+      path,
+    );
   }
   const value = Number(node.raw);
   if (!isValidOffsetMinutes(value)) {

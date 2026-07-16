@@ -1,4 +1,4 @@
-import type { CancellationToken } from "../execution/ports/cancellation.js";
+import type { CancellationToken } from "../execution/cancellation.js";
 
 /** Error thrown by {@link CancellationSource.throwIfCancellationRequested}. */
 export class CancellationError extends Error {
@@ -75,6 +75,3 @@ export class CancellationSource implements CancellationToken {
     }
   }
 }
-
-/** Explicit name for callers that prefer token-source terminology. */
-export { CancellationSource as CancellationTokenSource };

@@ -19,3 +19,7 @@ coverage/
 *.pyc
 .venv
 .env
+
+
+# Problem bundles are source assets; runtime state is ignored globally above.
+problems/

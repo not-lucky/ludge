@@ -61,7 +61,15 @@ export function redactTelemetryData(
   const seen = new WeakSet<object>();
   const output: Record<string, TelemetryValue> = {};
   for (const [key, value] of Object.entries(data)) {
-    output[key] = redactValue(value, key, policy, maxTextLength, maxDepth, 0, seen);
+    output[key] = redactValue(
+      value,
+      key,
+      policy,
+      maxTextLength,
+      maxDepth,
+      0,
+      seen,
+    );
   }
   return Object.freeze(output);
 }
@@ -104,7 +112,10 @@ function redactValue(
   if (isSecretKey(key) || isSourceKey(key)) {
     return "[redacted]";
   }
-  if (isInputKey(key) && (typeof value === "string" || value instanceof Uint8Array)) {
+  if (
+    isInputKey(key) &&
+    (typeof value === "string" || value instanceof Uint8Array)
+  ) {
     return redactInput(value, policy.verboseInput, maxTextLength);
   }
   if (isPathKey(key) && typeof value === "string") {
@@ -123,7 +134,10 @@ function redactValue(
     return truncate(value, maxTextLength);
   }
   if (value instanceof Uint8Array) {
-    return Object.freeze({ bytes: value.byteLength, value: "[binary redacted]" });
+    return Object.freeze({
+      bytes: value.byteLength,
+      value: "[binary redacted]",
+    });
   }
   if (depth >= maxDepth || typeof value !== "object") {
     return "[redacted]";
@@ -133,15 +147,31 @@ function redactValue(
   }
   seen.add(value);
   if (Array.isArray(value)) {
-    return Object.freeze(value.map((item) =>
-      redactValue(item, key, policy, maxTextLength, maxDepth, depth + 1, seen),
-    ));
+    return Object.freeze(
+      value.map((item) =>
+        redactValue(
+          item,
+          key,
+          policy,
+          maxTextLength,
+          maxDepth,
+          depth + 1,
+          seen,
+        ),
+      ),
+    );
   }
   if (isRecord(value)) {
     const output: Record<string, TelemetryValue> = {};
     for (const [childKey, childValue] of Object.entries(value)) {
       output[childKey] = redactValue(
-        childValue, childKey, policy, maxTextLength, maxDepth, depth + 1, seen,
+        childValue,
+        childKey,
+        policy,
+        maxTextLength,
+        maxDepth,
+        depth + 1,
+        seen,
       );
     }
     return Object.freeze(output);
@@ -155,15 +185,19 @@ function redactEnvironment(
 ): TelemetryValue {
   const output: Record<string, TelemetryValue> = {};
   for (const [key, value] of Object.entries(environment)) {
-    output[key] = TELEMETRY_ENVIRONMENT_ALLOW_LIST.has(key) && typeof value === "string"
-      ? truncate(value, maxTextLength)
-      : "[redacted]";
+    output[key] =
+      TELEMETRY_ENVIRONMENT_ALLOW_LIST.has(key) && typeof value === "string"
+        ? truncate(value, maxTextLength)
+        : "[redacted]";
   }
   return Object.freeze(output);
 }
 
 /** Normalize an absolute path only when it remains within the problem root. */
-export function normalizeProblemPath(path: string, problemRoot: string): string {
+export function normalizeProblemPath(
+  path: string,
+  problemRoot: string,
+): string {
   const root = resolve(problemRoot);
   const candidate = resolve(path);
   const relativePath = relative(root, candidate);
@@ -181,7 +215,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isSecretKey(key: string): boolean {
-  return /(?:secret|token|password|passwd|credential|api[_-]?key|authorization)/i.test(key);
+  return /(?:secret|token|password|passwd|credential|api[_-]?key|authorization)/i.test(
+    key,
+  );
 }
 
 function isSourceKey(key: string): boolean {
@@ -197,7 +233,9 @@ function isPathKey(key: string): boolean {
 }
 
 function truncate(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
+  return value.length <= maxLength
+    ? value
+    : `${value.slice(0, maxLength - 1)}…`;
 }
 
 function assertPositiveSafeInteger(value: number, field: string): void {

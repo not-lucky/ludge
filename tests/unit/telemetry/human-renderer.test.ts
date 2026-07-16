@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_HUMAN_FRAGMENT_LENGTH,
   renderHumanEvent,
-} from "../../../src/telemetry/render/index.js";
+} from "../../../src/telemetry/render/human.js";
 
 type Event = Parameters<typeof renderHumanEvent>[0];
 
@@ -44,7 +44,9 @@ describe("human telemetry renderer", () => {
     "renders %s events to stderr",
     (level) => {
       expect(
-        renderHumanEvent(event({ level, event: "error", data: { message: "failed" } })),
+        renderHumanEvent(
+          event({ level, event: "error", data: { message: "failed" } }),
+        ),
       ).toEqual({ stdout: "", stderr: 'error {"message":"failed"}\n' });
     },
   );
@@ -66,12 +68,18 @@ describe("human telemetry renderer", () => {
       implementationId: "implementation-2",
     } as Event;
 
-    expect(renderHumanEvent(changedMetadata)).toEqual(renderHumanEvent(original));
+    expect(renderHumanEvent(changedMetadata)).toEqual(
+      renderHumanEvent(original),
+    );
   });
 
   it("bounds a complete fragment deterministically", () => {
     const result = renderHumanEvent(
-      event({ level: "warn", event: "fuzz.mismatch", data: { detail: "x".repeat(2_000) } }),
+      event({
+        level: "warn",
+        event: "fuzz.mismatch",
+        data: { detail: "x".repeat(2_000) },
+      }),
     );
 
     expect(result.stdout).toBe("");

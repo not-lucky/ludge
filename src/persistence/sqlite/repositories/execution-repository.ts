@@ -5,15 +5,12 @@
  * its writer connection and therefore to the enclosing transaction.
  */
 
-import type { ExecutionWriter } from "../../ports/index.js";
 import type { SqliteConnection } from "../connection.js";
 import { insertObject } from "../row-io.js";
-import type { ExecutionRow, SqlitePersistenceRecords } from "../rows.js";
+import type { ExecutionRow } from "../rows.js";
 
 /** Writes execution rows through one SQLite transaction connection. */
-export class SqliteExecutionRepository
-  implements ExecutionWriter<SqlitePersistenceRecords>
-{
+export class SqliteExecutionRepository {
   public constructor(private readonly db: SqliteConnection) {}
 
   /** Commit an execution row. Durable only when the transaction commits. */

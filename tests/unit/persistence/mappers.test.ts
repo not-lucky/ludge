@@ -42,7 +42,9 @@ describe("seed encoding", () => {
   });
 
   it("rejects values above the u64 range", () => {
-    expect(() => encodeSeed((MAX_U64_SEED + 1n).toString())).toThrow(RangeError);
+    expect(() => encodeSeed((MAX_U64_SEED + 1n).toString())).toThrow(
+      RangeError,
+    );
   });
 
   it("rejects non-canonical decimal text", () => {

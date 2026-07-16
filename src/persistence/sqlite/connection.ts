@@ -137,9 +137,7 @@ function wrapStatement(
     },
     iterate(params?: SqlParams): IterableIterator<SqliteRow> {
       const iterator =
-        params === undefined
-          ? statement.iterate()
-          : statement.iterate(params);
+        params === undefined ? statement.iterate() : statement.iterate(params);
       return iterator as IterableIterator<SqliteRow>;
     },
   };

@@ -29,11 +29,7 @@
  * domain result types only.
  */
 
-import type {
-  CanonicalValue,
-  DictEntry,
-  RecordField,
-} from "../value/model.js";
+import type { CanonicalValue, DictEntry, RecordField } from "../value/model.js";
 import type {
   ComparisonMismatch,
   ComparisonPolicy,
@@ -148,10 +144,7 @@ export function semanticMismatch(
 
     case "set":
     case "frozenset": {
-      const a = actual as Extract<
-        CanonicalValue,
-        { tag: "set" | "frozenset" }
-      >;
+      const a = actual as Extract<CanonicalValue, { tag: "set" | "frozenset" }>;
       return sequenceMismatch(
         expected.items,
         a.items,
@@ -164,7 +157,14 @@ export function semanticMismatch(
 
     case "dict": {
       const a = actual as Extract<CanonicalValue, { tag: "dict" }>;
-      return dictMismatch(expected.entries, a.entries, policy, path, expected, actual);
+      return dictMismatch(
+        expected.entries,
+        a.entries,
+        policy,
+        path,
+        expected,
+        actual,
+      );
     }
 
     case "bytes": {
@@ -220,7 +220,14 @@ export function semanticMismatch(
       if (expected.type !== a.type || expected.name !== a.name) {
         return mismatch(path, "record identity differs", expected, actual);
       }
-      return recordMismatch(expected.fields, a.fields, policy, path, expected, actual);
+      return recordMismatch(
+        expected.fields,
+        a.fields,
+        policy,
+        path,
+        expected,
+        actual,
+      );
     }
 
     case "exception": {
@@ -245,7 +252,14 @@ export function semanticMismatch(
 
     case "TreeNode": {
       const a = actual as Extract<CanonicalValue, { tag: "TreeNode" }>;
-      return treeNodeMismatch(expected.values, a.values, policy, path, expected, actual);
+      return treeNodeMismatch(
+        expected.values,
+        a.values,
+        policy,
+        path,
+        expected,
+        actual,
+      );
     }
 
     case "ClassTrace": {
@@ -384,7 +398,12 @@ function treeNodeMismatch(
       continue;
     }
     if (e === null || a === null) {
-      return mismatch(`${path}.values[${i}]`, "slot presence differs", expectedNode, actualNode);
+      return mismatch(
+        `${path}.values[${i}]`,
+        "slot presence differs",
+        expectedNode,
+        actualNode,
+      );
     }
     const found = semanticMismatch(e, a, policy, `${path}.values[${i}]`);
     if (found !== null) {
@@ -439,7 +458,12 @@ function classTraceMismatch(
     const eHas = e.expected !== undefined;
     const aHas = a.expected !== undefined;
     if (eHas !== aHas) {
-      return mismatch(`${opPath}.expected`, "expected presence differs", expected, actual);
+      return mismatch(
+        `${opPath}.expected`,
+        "expected presence differs",
+        expected,
+        actual,
+      );
     }
     if (e.expected !== undefined && a.expected !== undefined) {
       const found = semanticMismatch(
